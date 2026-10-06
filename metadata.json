@@ -1,0 +1,6 @@
+{
+  "name": "PulseLink",
+  "description": "Send notifications between mobile devices in real-time and fetch battery, charging, 5G/4G network and device telemetry.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
