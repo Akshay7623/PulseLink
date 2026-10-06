@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:pivotX="54"
+        android:pivotY="54">
+        <!-- Center glowing ring / pulse -->
+        <path
+            android:pathData="M54,26 A28,28 0 1,0 54,82 A28,28 0 1,0 54,26 Z"
+            android:strokeWidth="2.5"
+            android:strokeColor="#38BDF8"
+            android:strokeAlpha="0.4" />
+        <path
+            android:pathData="M54,32 A22,22 0 1,0 54,76 A22,22 0 1,0 54,32 Z"
+            android:strokeWidth="2"
+            android:strokeColor="#818CF8"
+            android:strokeAlpha="0.6" />
+
+        <!-- Left Phone (Sender) -->
+        <path
+            android:fillColor="#38BDF8"
+            android:pathData="M31,35 C31,32.8 32.8,31 35,31 L45,31 C47.2,31 49,32.8 49,35 L49,69 C49,71.2 47.2,73 45,73 L35,73 C32.8,73 31,71.2 31,69 Z" />
+        <!-- Left Phone Screen cutout -->
+        <path
+            android:fillColor="#0F172A"
+            android:pathData="M33,36 L47,36 L47,65 L33,65 Z" />
+        <!-- Left Phone Notification Bubble -->
+        <path
+            android:fillColor="#34D399"
+            android:pathData="M36,42 L44,42 C44.5,42 45,42.5 45,43 L45,47 C45,47.5 44.5,48 44,48 L39,48 L37,50 L37,48 L36,48 C35.5,48 35,47.5 35,47 L35,43 C35,42.5 35.5,42 36,42 Z" />
+
+        <!-- Right Phone (Receiver) -->
+        <path
+            android:fillColor="#A78BFA"
+            android:pathData="M59,39 C59,36.8 60.8,35 63,35 L73,35 C75.2,35 77,36.8 77,39 L77,73 C77,75.2 75.2,77 73,77 L63,77 C60.8,77 59,75.2 59,73 Z" />
+        <!-- Right Phone Screen cutout -->
+        <path
+            android:fillColor="#0F172A"
+            android:pathData="M61,40 L75,40 L75,69 L61,69 Z" />
+        <!-- Right Phone Battery / 5G Icon -->
+        <!-- Battery body -->
+        <path
+            android:fillColor="#FBBF24"
+            android:pathData="M64,45 L70,45 C70.5,45 71,45.5 71,46 L71,51 C71,51.5 70.5,52 70,52 L64,52 C63.5,52 63,51.5 63,51 L63,46 C63,45.5 63.5,45 64,45 Z" />
+        <path
+            android:fillColor="#FBBF24"
+            android:pathData="M71,47.5 L72,47.5 L72,49.5 L71,49.5 Z" />
+        <!-- Lightning bolt on battery -->
+        <path
+            android:fillColor="#0F172A"
+            android:pathData="M67.5,46 L65.5,48.5 L67,48.5 L66.5,51 L68.5,48.5 L67,48.5 Z" />
+
+        <!-- Sync / Signal waves connecting both phones -->
+        <path
+            android:pathData="M48,47 C52,43 56,43 60,47"
+            android:strokeWidth="2.5"
+            android:strokeColor="#F43F5E"
+            android:strokeLineCap="round" />
+        <path
+            android:pathData="M49,53 C52,50 56,50 59,53"
+            android:strokeWidth="2.5"
+            android:strokeColor="#38BDF8"
+            android:strokeLineCap="round" />
+        <path
+            android:pathData="M48,59 C52,63 56,63 60,59"
+            android:strokeWidth="2.5"
+            android:strokeColor="#34D399"
+            android:strokeLineCap="round" />
+
+        <!-- 5G text or badge at top -->
+        <path
+            android:fillColor="#38BDF8"
+            android:pathData="M52,29 L56,29 C56.5,29 57,29.5 57,30 L57,31 L53.5,31 L53.5,32.5 L56,32.5 C56.5,32.5 57,33 57,34.5 L57,35.5 C57,36 56.5,36.5 56,36.5 L52,36.5 L52,35 L55.5,35 L55.5,34 L52,34 Z" />
+    </group>
+</vector>
