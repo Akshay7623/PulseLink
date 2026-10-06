@@ -3,6 +3,7 @@ package com.example.ui.components
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -56,6 +57,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.model.DeviceTelemetry
 import com.example.model.PeerDevice
+import com.example.model.PeerNotificationFeed
+import com.example.model.TelemetryStreamInterval
 import com.example.ui.theme.CyanAccent
 import com.example.ui.theme.EmeraldGlow
 import com.example.ui.theme.RoseAlert
@@ -72,9 +75,22 @@ fun TelemetryDashboardCard(
     onToggleStream: (Boolean) -> Unit,
     onRemoteAction: (actionType: String, payload: String) -> Unit,
     onSelectPeerClick: () -> Unit,
+    notificationFeed: PeerNotificationFeed?,
+    streamIntervalSeconds: Int,
+    onStreamIntervalChange: (Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var showClipboardDialog by remember { mutableStateOf(false) }
+    var showIntervalDialog by remember { mutableStateOf(false) }
+    val isCustomInterval = streamIntervalSeconds !in TelemetryStreamInterval.PRESET_SECONDS
+
+    if (showIntervalDialog) {
+        StreamIntervalDialog(
+            currentSeconds = streamIntervalSeconds,
+            onDismiss = { showIntervalDialog = false },
+            onConfirm = onStreamIntervalChange
+        )
+    }
 
     Card(
         modifier = modifier.fillMaxWidth(),
@@ -191,44 +207,70 @@ fun TelemetryDashboardCard(
                     }
                 }
             } else {
-                // Live Stream Switch
-                Row(
+                // Live Stream Switch + Update Interval Selector
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(14.dp))
                         .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
-                        .padding(horizontal = 12.dp, vertical = 6.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .clip(CircleShape)
-                                .background(if (isStreaming) EmeraldGlow else Color.Gray)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Column {
-                            Text(
-                                text = "Real-Time Telemetry Stream",
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.onSurface
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(8.dp)
+                                    .clip(CircleShape)
+                                    .background(if (isStreaming) EmeraldGlow else Color.Gray)
                             )
-                            Text(
-                                text = if (isStreaming) "Updating every 2s live" else "Manual refresh mode",
-                                fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
+                                Text(
+                                    text = "Real-Time Telemetry Stream",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = if (isStreaming) "Updating every ${streamIntervalSeconds}s live" else "Manual refresh mode",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                         }
+
+                        Switch(
+                            checked = isStreaming,
+                            onCheckedChange = onToggleStream,
+                            modifier = Modifier.testTag("stream_toggle")
+                        )
                     }
 
-                    Switch(
-                        checked = isStreaming,
-                        onCheckedChange = onToggleStream,
-                        modifier = Modifier.testTag("stream_toggle")
-                    )
+                    FlowRow(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 2.dp, bottom = 6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        TelemetryStreamInterval.PRESET_SECONDS.forEach { seconds ->
+                            StreamIntervalPill(
+                                label = "${seconds}s",
+                                isSelected = streamIntervalSeconds == seconds,
+                                onClick = { onStreamIntervalChange(seconds) }
+                            )
+                        }
+                        StreamIntervalPill(
+                            label = if (isCustomInterval) "Custom (${streamIntervalSeconds}s)" else "Custom",
+                            isSelected = isCustomInterval,
+                            onClick = { showIntervalDialog = true },
+                            modifier = Modifier.testTag("stream_interval_custom")
+                        )
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(14.dp))
@@ -245,6 +287,14 @@ fun TelemetryDashboardCard(
                     NetworkBadgeCard(
                         telemetry = telemetry,
                         titlePrefix = "${peer.name.take(12)} Network"
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // The peer's own app notifications (WhatsApp, SMS, calls)
+                    PeerNotificationsCard(
+                        feed = notificationFeed,
+                        titlePrefix = "${peer.name.take(12)} Notifications"
                     )
 
                     Spacer(modifier = Modifier.height(12.dp))
@@ -394,5 +444,32 @@ fun TelemetryDashboardCard(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun StreamIntervalPill(
+    label: String,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(10.dp))
+            .background(
+                if (isSelected) CyanAccent.copy(alpha = 0.2f)
+                else MaterialTheme.colorScheme.surface
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = label,
+            fontSize = 12.sp,
+            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+            color = if (isSelected) CyanAccent else MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }

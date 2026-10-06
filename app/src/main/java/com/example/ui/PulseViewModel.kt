@@ -10,8 +10,11 @@ import com.example.data.local.entity.PeerEntity
 import com.example.model.DeviceTelemetry
 import com.example.model.NotificationPayload
 import com.example.model.PeerDevice
+import com.example.model.PeerNotificationFeed
 import com.example.model.RemoteActionRequest
+import com.example.model.TelemetryStreamInterval
 import com.example.network.NetworkResult
+import com.example.notification.DeviceNotificationStore
 import com.example.service.PulseForegroundService
 import com.example.util.JsonUtils
 import kotlinx.coroutines.Job
@@ -61,6 +64,12 @@ class PulseViewModel(application: Application) : AndroidViewModel(application) {
     private val _isStreamingTelemetry = MutableStateFlow(false)
     val isStreamingTelemetry: StateFlow<Boolean> = _isStreamingTelemetry.asStateFlow()
 
+    private val _streamIntervalSeconds = MutableStateFlow(
+        application.getSharedPreferences("pulselink_prefs", Context.MODE_PRIVATE)
+            .getInt("stream_interval_seconds", TelemetryStreamInterval.DEFAULT_SECONDS)
+    )
+    val streamIntervalSeconds: StateFlow<Int> = _streamIntervalSeconds.asStateFlow()
+
     private val _isSendingNotification = MutableStateFlow(false)
     val isSendingNotification: StateFlow<Boolean> = _isSendingNotification.asStateFlow()
 
@@ -75,6 +84,15 @@ class PulseViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _isBackgroundServiceRunning = MutableStateFlow(false)
     val isBackgroundServiceRunning: StateFlow<Boolean> = _isBackgroundServiceRunning.asStateFlow()
+
+    private val _peerNotificationFeed = MutableStateFlow<PeerNotificationFeed?>(null)
+    val peerNotificationFeed: StateFlow<PeerNotificationFeed?> = _peerNotificationFeed.asStateFlow()
+
+    private val _isSharingNotifications = MutableStateFlow(DeviceNotificationStore.isSharingEnabled(application))
+    val isSharingNotifications: StateFlow<Boolean> = _isSharingNotifications.asStateFlow()
+
+    private val _hasNotificationAccess = MutableStateFlow(DeviceNotificationStore.hasNotificationAccess(application))
+    val hasNotificationAccess: StateFlow<Boolean> = _hasNotificationAccess.asStateFlow()
 
     private var telemetryStreamJob: Job? = null
     private var localTelemetryTickerJob: Job? = null
@@ -98,6 +116,8 @@ class PulseViewModel(application: Application) : AndroidViewModel(application) {
 
     fun refreshLocalTelemetry() {
         _localTelemetry.value = telemetryCollector.collectTelemetry(_customDeviceName.value)
+        // Picks up the user granting or revoking Notification access in system Settings
+        _hasNotificationAccess.value = DeviceNotificationStore.hasNotificationAccess(app)
     }
 
     fun updateDeviceName(newName: String) {
@@ -115,14 +135,36 @@ class PulseViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun selectPeer(peer: PeerDevice) {
+        clearNotificationFeedIfPeerChanged(peer.ip)
         _selectedPeer.value = peer
         fetchPeerTelemetry(peer.ip, peer.port)
     }
 
     fun selectPeerByIp(ip: String, port: Int = 8765, name: String = "Manual Peer") {
         val peer = PeerDevice(id = ip, name = name, ip = ip, port = port, isOnline = true)
+        clearNotificationFeedIfPeerChanged(ip)
         _selectedPeer.value = peer
         fetchPeerTelemetry(ip, port)
+    }
+
+    // Never show one device's notifications under another device's name
+    private fun clearNotificationFeedIfPeerChanged(newIp: String) {
+        if (_selectedPeer.value?.ip != newIp) {
+            _peerNotificationFeed.value = null
+        }
+    }
+
+    private suspend fun refreshPeerNotifications(ip: String, port: Int) {
+        val result = pulseClient.fetchNotifications(ip, port)
+        // Drop responses that arrive after the user switched to another peer
+        if (result is NetworkResult.Success && _selectedPeer.value?.ip == ip) {
+            _peerNotificationFeed.value = result.data
+        }
+    }
+
+    fun toggleNotificationSharing(enabled: Boolean) {
+        DeviceNotificationStore.setSharingEnabled(app, enabled)
+        _isSharingNotifications.value = enabled
     }
 
     fun fetchPeerTelemetry(ip: String, port: Int = 8765) {
@@ -140,6 +182,7 @@ class PulseViewModel(application: Application) : AndroidViewModel(application) {
                         port = port,
                         telemetry = result.data
                     )
+                    refreshPeerNotifications(ip, port)
                 }
                 is NetworkResult.Error -> {
                     _peerLatencyMs.value = null
@@ -163,10 +206,25 @@ class PulseViewModel(application: Application) : AndroidViewModel(application) {
                     if (res is NetworkResult.Success) {
                         _peerTelemetry.value = res.data
                         _peerLatencyMs.value = res.latencyMs
+                        refreshPeerNotifications(currentPeer.ip, currentPeer.port)
                     }
-                    delay(2000) // Stream update every 2 seconds
+                    delay(_streamIntervalSeconds.value * 1000L) // Stream update at the chosen interval
                 }
             }
+        }
+    }
+
+    fun setStreamInterval(seconds: Int) {
+        val clamped = seconds.coerceIn(TelemetryStreamInterval.MIN_SECONDS, TelemetryStreamInterval.MAX_SECONDS)
+        _streamIntervalSeconds.value = clamped
+        app.getSharedPreferences("pulselink_prefs", Context.MODE_PRIVATE)
+            .edit()
+            .putInt("stream_interval_seconds", clamped)
+            .apply()
+
+        // Restart a running stream so the new interval applies right away
+        if (_isStreamingTelemetry.value) {
+            toggleTelemetryStream(true)
         }
     }
 

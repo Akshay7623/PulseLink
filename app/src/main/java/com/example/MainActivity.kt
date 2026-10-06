@@ -1,6 +1,7 @@
 package com.example
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -125,6 +126,7 @@ fun PulseLinkApp(viewModel: PulseViewModel) {
     val peerTelemetry by viewModel.peerTelemetry.collectAsStateWithLifecycle()
     val isFetchingPeerTelemetry by viewModel.isFetchingPeerTelemetry.collectAsStateWithLifecycle()
     val isStreamingTelemetry by viewModel.isStreamingTelemetry.collectAsStateWithLifecycle()
+    val streamIntervalSeconds by viewModel.streamIntervalSeconds.collectAsStateWithLifecycle()
     val latencyMs by viewModel.peerLatencyMs.collectAsStateWithLifecycle()
     val discoveredPeers by viewModel.discoveredPeers.collectAsStateWithLifecycle()
     val savedPeers by viewModel.savedPeers.collectAsStateWithLifecycle()
@@ -136,6 +138,9 @@ fun PulseLinkApp(viewModel: PulseViewModel) {
     val isSendingNotification by viewModel.isSendingNotification.collectAsStateWithLifecycle()
     val lastSendResult by viewModel.lastSendResult.collectAsStateWithLifecycle()
     val isBackgroundServiceRunning by viewModel.isBackgroundServiceRunning.collectAsStateWithLifecycle()
+    val peerNotificationFeed by viewModel.peerNotificationFeed.collectAsStateWithLifecycle()
+    val isSharingNotifications by viewModel.isSharingNotifications.collectAsStateWithLifecycle()
+    val hasNotificationAccess by viewModel.hasNotificationAccess.collectAsStateWithLifecycle()
 
     var showDirectIpDialog by remember { mutableStateOf(false) }
     var showHotspotGuideDialog by remember { mutableStateOf(false) }
@@ -206,10 +211,22 @@ fun PulseLinkApp(viewModel: PulseViewModel) {
             isServerRunning = isServerRunning,
             serverPort = serverPort,
             isBackgroundService = isBackgroundServiceRunning,
+            isSharingNotifications = isSharingNotifications,
+            hasNotificationAccess = hasNotificationAccess,
             serverLogs = serverLogs,
             onUpdateDeviceName = { viewModel.updateDeviceName(it) },
             onToggleServer = { viewModel.toggleServer(it, serverPort) },
             onToggleBackgroundService = { viewModel.toggleBackgroundService(it) },
+            onToggleNotificationSharing = { viewModel.toggleNotificationSharing(it) },
+            onOpenNotificationAccess = {
+                try {
+                    context.startActivity(Intent(android.provider.Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+                } catch (e: Exception) {
+                    scope.launch {
+                        snackbarHostState.showSnackbar("Open Settings > Notification access and allow PulseLink")
+                    }
+                }
+            },
             onDismiss = { showSettingsDialog = false }
         )
     }
@@ -364,7 +381,10 @@ fun PulseLinkApp(viewModel: PulseViewModel) {
                                         viewModel.sendRemoteAction(peer.ip, peer.port, actionType, payload)
                                     }
                                 },
-                                onSelectPeerClick = { selectedTab = PulseTab.DEVICES }
+                                onSelectPeerClick = { selectedTab = PulseTab.DEVICES },
+                                notificationFeed = peerNotificationFeed,
+                                streamIntervalSeconds = streamIntervalSeconds,
+                                onStreamIntervalChange = { viewModel.setStreamInterval(it) }
                             )
                         }
                     }

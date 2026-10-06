@@ -7,6 +7,8 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import com.example.data.repository.PulseRepository
+import com.example.model.PeerNotificationFeed
+import com.example.notification.DeviceNotificationStore
 import com.example.notification.PulseNotificationManager
 import com.example.telemetry.TelemetryCollector
 import com.example.util.JsonUtils
@@ -144,6 +146,17 @@ class PulseServer(
                         val responseJson = JsonUtils.telemetryToJson(telemetry)
                         sendJsonResponse(output, 200, responseJson.toString())
                         addLog("📊 Telemetry sent to $clientIp")
+                    }
+
+                    method == "GET" && path.startsWith("/api/notifications") -> {
+                        // Only hand out this device's notifications if the user opted in
+                        val sharingEnabled = DeviceNotificationStore.isSharingEnabled(context)
+                        val feed = PeerNotificationFeed(
+                            sharingEnabled = sharingEnabled,
+                            accessGranted = DeviceNotificationStore.hasNotificationAccess(context),
+                            notifications = if (sharingEnabled) DeviceNotificationStore.snapshot() else emptyList()
+                        )
+                        sendJsonResponse(output, 200, JsonUtils.notificationFeedToJson(feed).toString())
                     }
 
                     method == "POST" && path.startsWith("/api/notify") -> {

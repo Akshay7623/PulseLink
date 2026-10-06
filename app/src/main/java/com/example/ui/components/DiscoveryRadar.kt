@@ -333,7 +333,8 @@ private fun PeerItemCard(
                 MaterialTheme.colorScheme.surface
         ),
         border = if (isSelected) androidx.compose.foundation.BorderStroke(1.5.dp, CyanAccent) else null,
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+        // Flat when selected: a shadow would show through the translucent container as an inner box
+        elevation = CardDefaults.cardElevation(defaultElevation = if (isSelected) 0.dp else 1.dp)
     ) {
         Row(
             modifier = Modifier

@@ -14,8 +14,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -39,6 +37,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -162,16 +161,19 @@ fun NotificationHistoryList(
                 }
             }
         } else {
-            LazyColumn(
+            // Plain Column: this list is already hosted inside the screen's LazyColumn
+            Column(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                items(filteredList, key = { it.id }) { item ->
-                    NotificationItemCard(
-                        item = item,
-                        onDelete = { onDeleteNotification(item.id) },
-                        onMarkRead = { onMarkRead(item.id) }
-                    )
+                filteredList.forEach { item ->
+                    key(item.id) {
+                        NotificationItemCard(
+                            item = item,
+                            onDelete = { onDeleteNotification(item.id) },
+                            onMarkRead = { onMarkRead(item.id) }
+                        )
+                    }
                 }
             }
         }
@@ -186,6 +188,7 @@ fun NotificationItemCard(
 ) {
     var expanded by remember { mutableStateOf(false) }
     val isReceived = item.type == "RECEIVED"
+    val isUnreadReceived = !item.isRead && isReceived
     val isUrgent = item.priority == "HIGH"
     val timeFormatted = remember(item.timestamp) {
         SimpleDateFormat("MMM dd, HH:mm:ss", Locale.getDefault()).format(Date(item.timestamp))
@@ -205,12 +208,13 @@ fun NotificationItemCard(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(
-            containerColor = if (!item.isRead && isReceived)
+            containerColor = if (isUnreadReceived)
                 MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f)
             else
                 MaterialTheme.colorScheme.surface
         ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+        // Flat when unread: a shadow would show through the translucent container as an inner box
+        elevation = CardDefaults.cardElevation(defaultElevation = if (isUnreadReceived) 0.dp else 1.dp)
     ) {
         Column(
             modifier = Modifier

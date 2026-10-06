@@ -13,13 +13,17 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.NetworkWifi
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.WifiTethering
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -42,8 +46,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.model.TelemetryStreamInterval
 import com.example.ui.theme.CyanAccent
 import com.example.ui.theme.ElectricIndigo
 import com.example.ui.theme.EmeraldGlow
@@ -185,15 +191,82 @@ fun HotspotGuideDialog(onDismiss: () -> Unit) {
 }
 
 @Composable
+fun StreamIntervalDialog(
+    currentSeconds: Int,
+    onDismiss: () -> Unit,
+    onConfirm: (seconds: Int) -> Unit
+) {
+    var secondsStr by remember { mutableStateOf(currentSeconds.toString()) }
+    val seconds = secondsStr.toIntOrNull()
+    val isValid = seconds != null &&
+        seconds in TelemetryStreamInterval.MIN_SECONDS..TelemetryStreamInterval.MAX_SECONDS
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Timer, contentDescription = "Interval", tint = CyanAccent)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Custom Update Interval")
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = "How often the live telemetry stream should refresh:",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                OutlinedTextField(
+                    value = secondsStr,
+                    onValueChange = { input -> secondsStr = input.filter { it.isDigit() }.take(4) },
+                    label = { Text("Seconds (${TelemetryStreamInterval.MIN_SECONDS} - ${TelemetryStreamInterval.MAX_SECONDS})") },
+                    singleLine = true,
+                    isError = secondsStr.isNotEmpty() && !isValid,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("stream_interval_input")
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (seconds != null && isValid) {
+                        onConfirm(seconds)
+                        onDismiss()
+                    }
+                },
+                enabled = isValid,
+                modifier = Modifier.testTag("stream_interval_confirm_btn")
+            ) {
+                Text("Set Interval")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
+@Composable
 fun DeviceSettingsDialog(
     deviceName: String,
     isServerRunning: Boolean,
     serverPort: Int,
     isBackgroundService: Boolean,
+    isSharingNotifications: Boolean,
+    hasNotificationAccess: Boolean,
     serverLogs: List<String>,
     onUpdateDeviceName: (String) -> Unit,
     onToggleServer: (Boolean) -> Unit,
     onToggleBackgroundService: (Boolean) -> Unit,
+    onToggleNotificationSharing: (Boolean) -> Unit,
+    onOpenNotificationAccess: () -> Unit,
     onDismiss: () -> Unit
 ) {
     var editName by remember { mutableStateOf(deviceName) }
@@ -208,7 +281,10 @@ fun DeviceSettingsDialog(
             }
         },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
                 // Device Name Edit
                 OutlinedTextField(
                     value = editName,
@@ -263,6 +339,52 @@ fun DeviceSettingsDialog(
                     Switch(
                         checked = isServerRunning,
                         onCheckedChange = onToggleServer
+                    )
+                }
+
+                // Share This Device's Notifications Toggle
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Share My Notifications",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = when {
+                                !isSharingNotifications -> "Let other PulseLink devices see this phone's app notifications (WhatsApp, SMS, calls)"
+                                hasNotificationAccess -> "On: any device on this network can read this phone's notifications"
+                                else -> "Notification access is not granted yet"
+                            },
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = isSharingNotifications,
+                        onCheckedChange = onToggleNotificationSharing,
+                        modifier = Modifier.testTag("share_notifications_toggle")
+                    )
+                }
+
+                if (isSharingNotifications && !hasNotificationAccess) {
+                    OutlinedButton(
+                        onClick = onOpenNotificationAccess,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("grant_notification_access_btn")
+                    ) {
+                        Text("Grant Notification Access")
+                    }
+                    Text(
+                        text = "If Android says \"Restricted setting\": open Settings > Apps > PulseLink, tap the ⋮ menu, choose \"Allow restricted settings\", then try again.",
+                        fontSize = 10.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        lineHeight = 13.sp
                     )
                 }
 

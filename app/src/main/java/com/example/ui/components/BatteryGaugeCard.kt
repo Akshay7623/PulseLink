@@ -82,7 +82,8 @@ fun BatteryGaugeCard(
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
         ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        // Flat: a shadow would show through the translucent container as an inner box
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             // Header
@@ -212,7 +213,9 @@ fun BatteryGaugeCard(
                     .height(6.dp)
                     .clip(RoundedCornerShape(3.dp)),
                 color = batteryColor,
-                trackColor = MaterialTheme.colorScheme.surface
+                trackColor = MaterialTheme.colorScheme.surface,
+                gapSize = 0.dp,
+                drawStopIndicator = {}
             )
 
             Spacer(modifier = Modifier.height(14.dp))

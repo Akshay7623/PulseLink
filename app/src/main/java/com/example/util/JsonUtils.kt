@@ -1,9 +1,12 @@
 package com.example.util
 
+import com.example.model.DeviceNotification
 import com.example.model.DeviceTelemetry
 import com.example.model.NotificationPayload
+import com.example.model.PeerNotificationFeed
 import com.example.model.RemoteActionRequest
 import com.example.model.RemoteActionResponse
+import org.json.JSONArray
 import org.json.JSONObject
 
 object JsonUtils {
@@ -138,6 +141,50 @@ object JsonUtils {
             message = json.optString("message", ""),
             telemetry = telemetry,
             timestamp = json.optLong("timestamp", System.currentTimeMillis())
+        )
+    }
+
+    fun notificationFeedToJson(feed: PeerNotificationFeed): JSONObject {
+        val items = JSONArray()
+        feed.notifications.forEach { item ->
+            val itemJson = JSONObject()
+            itemJson.put("key", item.key)
+            itemJson.put("packageName", item.packageName)
+            itemJson.put("appName", item.appName)
+            itemJson.put("title", item.title)
+            itemJson.put("text", item.text)
+            itemJson.put("category", item.category)
+            itemJson.put("postTime", item.postTime)
+            items.put(itemJson)
+        }
+
+        val json = JSONObject()
+        json.put("sharingEnabled", feed.sharingEnabled)
+        json.put("accessGranted", feed.accessGranted)
+        json.put("notifications", items)
+        return json
+    }
+
+    fun jsonToNotificationFeed(json: JSONObject): PeerNotificationFeed {
+        val items = json.optJSONArray("notifications") ?: JSONArray()
+        val notifications = (0 until items.length()).mapNotNull { index ->
+            items.optJSONObject(index)?.let { itemJson ->
+                DeviceNotification(
+                    key = itemJson.optString("key", ""),
+                    packageName = itemJson.optString("packageName", ""),
+                    appName = itemJson.optString("appName", ""),
+                    title = itemJson.optString("title", ""),
+                    text = itemJson.optString("text", ""),
+                    category = itemJson.optString("category", ""),
+                    postTime = itemJson.optLong("postTime", System.currentTimeMillis())
+                )
+            }
+        }
+
+        return PeerNotificationFeed(
+            sharingEnabled = json.optBoolean("sharingEnabled", false),
+            accessGranted = json.optBoolean("accessGranted", false),
+            notifications = notifications
         )
     }
 }

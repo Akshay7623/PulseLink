@@ -2,6 +2,7 @@ package com.example.network
 
 import com.example.model.DeviceTelemetry
 import com.example.model.NotificationPayload
+import com.example.model.PeerNotificationFeed
 import com.example.model.RemoteActionRequest
 import com.example.model.RemoteActionResponse
 import com.example.util.JsonUtils
@@ -82,6 +83,33 @@ class PulseClient {
                 NetworkResult.Success(telemetry, latency)
             } else {
                 NetworkResult.Error("Failed to fetch telemetry (HTTP $code)")
+            }
+        } catch (e: Exception) {
+            NetworkResult.Error(e.localizedMessage ?: "Cannot reach $targetIp:$targetPort", e)
+        }
+    }
+
+    suspend fun fetchNotifications(
+        targetIp: String,
+        targetPort: Int
+    ): NetworkResult<PeerNotificationFeed> = withContext(Dispatchers.IO) {
+        try {
+            val url = URL("http://$targetIp:$targetPort/api/notifications")
+            val conn = (url.openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = 5000
+                readTimeout = 5000
+                setRequestProperty("Accept", "application/json")
+            }
+
+            when (val code = conn.responseCode) {
+                200 -> {
+                    val responseText = conn.inputStream.bufferedReader().use { it.readText() }
+                    NetworkResult.Success(JsonUtils.jsonToNotificationFeed(JSONObject(responseText)))
+                }
+                // Peer runs an older PulseLink that has no notifications endpoint
+                404 -> NetworkResult.Success(PeerNotificationFeed(isSupported = false))
+                else -> NetworkResult.Error("Failed to fetch notifications (HTTP $code)")
             }
         } catch (e: Exception) {
             NetworkResult.Error(e.localizedMessage ?: "Cannot reach $targetIp:$targetPort", e)

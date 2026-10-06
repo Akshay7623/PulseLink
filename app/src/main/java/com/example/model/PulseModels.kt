@@ -67,6 +67,39 @@ data class RemoteActionResponse(
 )
 
 /**
+ * A system notification (WhatsApp, SMS, call, etc.) captured on a device
+ */
+data class DeviceNotification(
+    val key: String = "",
+    val packageName: String = "",
+    val appName: String = "",
+    val title: String = "",
+    val text: String = "",
+    val category: String = "", // android.app.Notification category, e.g. "msg", "call", "missed_call"
+    val postTime: Long = System.currentTimeMillis()
+)
+
+/**
+ * Device notifications shared by a peer, along with the peer's sharing status
+ */
+data class PeerNotificationFeed(
+    val isSupported: Boolean = true, // false when the peer runs an older PulseLink without this feature
+    val sharingEnabled: Boolean = false,
+    val accessGranted: Boolean = false,
+    val notifications: List<DeviceNotification> = emptyList()
+)
+
+/**
+ * Refresh interval choices for the real-time telemetry stream
+ */
+object TelemetryStreamInterval {
+    const val DEFAULT_SECONDS = 2
+    const val MIN_SECONDS = 1
+    const val MAX_SECONDS = 3600
+    val PRESET_SECONDS = listOf(2, 5, 10, 20, 30, 60)
+}
+
+/**
  * Representation of a discovered or saved peer device
  */
 data class PeerDevice(
