@@ -5,8 +5,12 @@ import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.PulseApplication
+import com.example.call.BluetoothSoundState
+import com.example.call.RelayState
 import com.example.data.local.entity.NotificationEntity
 import com.example.data.local.entity.PeerEntity
+import com.example.model.CallResult
+import com.example.model.DeviceNotification
 import com.example.model.DeviceTelemetry
 import com.example.model.NotificationPayload
 import com.example.model.PeerDevice
@@ -15,6 +19,8 @@ import com.example.model.RemoteActionRequest
 import com.example.model.TelemetryStreamInterval
 import com.example.network.NetworkResult
 import com.example.notification.DeviceNotificationStore
+import com.example.security.Pairing
+import com.example.service.CallAudioService
 import com.example.service.PulseForegroundService
 import com.example.util.JsonUtils
 import kotlinx.coroutines.Job
@@ -94,6 +100,48 @@ class PulseViewModel(application: Application) : AndroidViewModel(application) {
     private val _hasNotificationAccess = MutableStateFlow(DeviceNotificationStore.hasNotificationAccess(application))
     val hasNotificationAccess: StateFlow<Boolean> = _hasNotificationAccess.asStateFlow()
 
+    private val _isPeerAlertsEnabled = MutableStateFlow(DeviceNotificationStore.isPeerAlertsEnabled(application))
+    val isPeerAlertsEnabled: StateFlow<Boolean> = _isPeerAlertsEnabled.asStateFlow()
+
+    private val _isRemoteCallsAllowed = MutableStateFlow(app.callController.isEnabled)
+    val isRemoteCallsAllowed: StateFlow<Boolean> = _isRemoteCallsAllowed.asStateFlow()
+
+    private val _hasPhonePermission = MutableStateFlow(app.callController.hasPermission())
+    val hasPhonePermission: StateFlow<Boolean> = _hasPhonePermission.asStateFlow()
+
+    // This phone's own pairing code, to be typed into the phone that controls its calls
+    val myPairingCode: String = Pairing.format(app.pairing.myCode)
+
+    private val _partnerPairingCode = MutableStateFlow(app.pairing.partnerCode)
+    val partnerPairingCode: StateFlow<String> = _partnerPairingCode.asStateFlow()
+
+    private val _isPairingCodeNeeded = MutableStateFlow(false)
+    val isPairingCodeNeeded: StateFlow<Boolean> = _isPairingCodeNeeded.asStateFlow()
+
+    val callSoundState: StateFlow<RelayState> = app.callAudioRelay.state
+
+    private val _isHearingCallsHere = MutableStateFlow(app.callAudioRelay.isClientEnabled)
+    val isHearingCallsHere: StateFlow<Boolean> = _isHearingCallsHere.asStateFlow()
+
+    private val _isCallLoudspeakerOn = MutableStateFlow(app.callAudioRelay.isLoudspeakerOn)
+    val isCallLoudspeakerOn: StateFlow<Boolean> = _isCallLoudspeakerOn.asStateFlow()
+
+    private val _isRelayingCallSound = MutableStateFlow(app.callAudioRelay.isHostEnabled)
+    val isRelayingCallSound: StateFlow<Boolean> = _isRelayingCallSound.asStateFlow()
+
+    private val _hasMicPermission = MutableStateFlow(app.callAudioRelay.hasMicPermission())
+    val hasMicPermission: StateFlow<Boolean> = _hasMicPermission.asStateFlow()
+
+    private val _isAccessibilityOn = MutableStateFlow(app.callAudioRelay.isAccessibilityOn())
+    val isAccessibilityOn: StateFlow<Boolean> = _isAccessibilityOn.asStateFlow()
+
+    private val _hasBluetoothPermission = MutableStateFlow(app.bluetoothSoundLink.hasPermission())
+    val hasBluetoothPermission: StateFlow<Boolean> = _hasBluetoothPermission.asStateFlow()
+
+    // Whether the call sound asked for from this phone would travel over Bluetooth, and why not
+    private val _bluetoothSound = MutableStateFlow(app.bluetoothSoundLink.state(null))
+    val bluetoothSound: StateFlow<BluetoothSoundState> = _bluetoothSound.asStateFlow()
+
     private var telemetryStreamJob: Job? = null
     private var localTelemetryTickerJob: Job? = null
 
@@ -110,6 +158,14 @@ class PulseViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
+        // The peer pushes a change the moment its notifications change, so the list stays live
+        viewModelScope.launch {
+            pulseServer.peerNotificationChanges.collect { ip ->
+                val peer = _selectedPeer.value
+                if (peer?.ip == ip) refreshPeerNotifications(peer.ip, peer.port)
+            }
+        }
+
         // Auto-start discovery scan
         startScanning()
     }
@@ -118,6 +174,13 @@ class PulseViewModel(application: Application) : AndroidViewModel(application) {
         _localTelemetry.value = telemetryCollector.collectTelemetry(_customDeviceName.value)
         // Picks up the user granting or revoking Notification access in system Settings
         _hasNotificationAccess.value = DeviceNotificationStore.hasNotificationAccess(app)
+        _hasPhonePermission.value = app.callController.hasPermission()
+        _hasMicPermission.value = app.callAudioRelay.hasMicPermission()
+        _isAccessibilityOn.value = app.callAudioRelay.isAccessibilityOn()
+        _hasBluetoothPermission.value = app.bluetoothSoundLink.hasPermission()
+        _bluetoothSound.value = app.bluetoothSoundLink.state(_peerTelemetry.value?.bluetoothSoundHost)
+        // Picks up the Nearby devices permission being granted while "Relay Call Sound" is already on
+        app.callAudioRelay.syncBluetoothHost()
     }
 
     fun updateDeviceName(newName: String) {
@@ -149,8 +212,15 @@ class PulseViewModel(application: Application) : AndroidViewModel(application) {
 
     // Never show one device's notifications under another device's name
     private fun clearNotificationFeedIfPeerChanged(newIp: String) {
-        if (_selectedPeer.value?.ip != newIp) {
+        val previous = _selectedPeer.value
+        if (previous?.ip != newIp) {
             _peerNotificationFeed.value = null
+            // Alerts follow the selected peer, so the one being left should stop pushing here
+            if (previous != null) {
+                viewModelScope.launch {
+                    pulseClient.unsubscribeFromNotifications(previous.ip, previous.port, serverPort.value)
+                }
+            }
         }
     }
 
@@ -162,9 +232,191 @@ class PulseViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * Clears one of the peer's notifications on the peer itself, after the user swiped it away here.
+     */
+    fun dismissPeerNotification(item: DeviceNotification) {
+        val peer = _selectedPeer.value ?: return
+        // Gone from this screen right away; the peer's next push confirms it
+        _peerNotificationFeed.value = _peerNotificationFeed.value?.let { feed ->
+            feed.copy(notifications = feed.notifications.filterNot { it.key == item.key })
+        }
+        app.notificationManager.cancelPeerDeviceNotification(peer.ip, item.key)
+
+        viewModelScope.launch {
+            val result = pulseClient.dismissNotification(peer.ip, peer.port, item.key)
+            if (result !is NetworkResult.Success || !result.data) {
+                _lastSendResult.value = "❌ Could not remove it on ${peer.name}"
+                refreshPeerNotifications(peer.ip, peer.port)
+            }
+        }
+    }
+
+    /**
+     * Answers one of the peer's chats from here; the peer sends it through the chat app's own reply box.
+     */
+    fun replyToPeerNotification(item: DeviceNotification, text: String) {
+        val peer = _selectedPeer.value ?: return
+        val reply = text.trim()
+        if (reply.isEmpty()) return
+
+        viewModelScope.launch {
+            val result = pulseClient.replyToNotification(peer.ip, peer.port, item.key, reply)
+            if (result is NetworkResult.Success && result.data) {
+                _lastSendResult.value = "💬 Reply sent to ${item.title.ifBlank { item.appName }}"
+            } else {
+                _lastSendResult.value = "❌ Could not reply on ${peer.name}"
+                refreshPeerNotifications(peer.ip, peer.port)
+            }
+        }
+    }
+
+    /**
+     * Has the peer call a number from its SIM. The call happens on the peer; with "Hear and talk on
+     * this phone" on, its sound is relayed here.
+     */
+    fun dialOnPeer(number: String, speaker: Boolean) {
+        val peer = _selectedPeer.value ?: return
+        viewModelScope.launch {
+            // A Bluetooth headset on the peer carries the call by itself. The relay is for a call on
+            // the peer's loudspeaker, which it listens to, so such a call has to start there.
+            val onHeadset = peerHasHeadset(peer) && !speaker
+            val relaySound = _isHearingCallsHere.value && !onHeadset
+            val result = pulseClient.dialNumber(peer.ip, peer.port, number, speaker || relaySound, app.pairing.partnerKey())
+            reportCallResult(peer, result, "📞 ${peer.name} is calling $number")
+            if (relaySound && result.isOk()) startCallSound()
+        }
+    }
+
+    /**
+     * Asks the peer again which Bluetooth headset, if any, its calls would use.
+     */
+    fun refreshPeerHeadset() {
+        val peer = _selectedPeer.value ?: return
+        viewModelScope.launch { peerHasHeadset(peer) }
+    }
+
+    // Asked afresh each time: earbuds come and go without the peer telling anyone
+    private suspend fun peerHasHeadset(peer: PeerDevice): Boolean {
+        val result = pulseClient.fetchTelemetry(peer.ip, peer.port)
+        if (result is NetworkResult.Success && _selectedPeer.value?.ip == peer.ip) _peerTelemetry.value = result.data
+        return result is NetworkResult.Success && !result.data.bluetoothHeadset.isNullOrEmpty()
+    }
+
+    fun answerCallOnPeer() {
+        val peer = _selectedPeer.value ?: return
+        viewModelScope.launch {
+            val relaySound = _isHearingCallsHere.value && !peerHasHeadset(peer)
+            val result = pulseClient.answerCall(peer.ip, peer.port, app.pairing.partnerKey())
+            reportCallResult(peer, result, "📞 Call answered on ${peer.name}")
+            if (relaySound && result.isOk()) startCallSound()
+        }
+    }
+
+    /**
+     * Hangs up the peer's call in progress, or declines the one ringing there.
+     */
+    fun endCallOnPeer() {
+        val peer = _selectedPeer.value ?: return
+        viewModelScope.launch {
+            val result = pulseClient.endCall(peer.ip, peer.port, app.pairing.partnerKey())
+            reportCallResult(peer, result, "📞 Call ended on ${peer.name}")
+            if (result.isOk()) stopCallSound()
+        }
+    }
+
+    private fun NetworkResult<CallResult>.isOk() = this is NetworkResult.Success && data == CallResult.OK
+
+    private fun reportCallResult(peer: PeerDevice, result: NetworkResult<CallResult>, successMessage: String) {
+        _lastSendResult.value = when (result) {
+            is NetworkResult.Error -> "❌ Could not reach ${peer.name}"
+            is NetworkResult.Success -> when (result.data) {
+                CallResult.OK -> successMessage
+                CallResult.DISABLED -> "❌ Turn on \"Allow Remote Calls\" in PulseLink settings on ${peer.name}"
+                CallResult.NO_PERMISSION -> "❌ ${peer.name} has not given PulseLink the Phone permission"
+                CallResult.INVALID_NUMBER -> "❌ Enter a phone number of 3 to 15 digits"
+                CallResult.NO_CALL -> "No call to act on at ${peer.name} right now"
+                CallResult.NOT_PAIRED -> "❌ Enter the pairing code shown in PulseLink settings on ${peer.name}"
+                CallResult.UNSUPPORTED -> "❌ Update PulseLink on ${peer.name} to control its calls"
+                CallResult.RELAY_OFF, CallResult.RELAY_NOT_READY, CallResult.FAILED -> "❌ ${peer.name} could not do that"
+            }
+        }
+        // Ask for the code right away rather than leaving the user to find where it goes
+        if (result is NetworkResult.Success && result.data == CallResult.NOT_PAIRED) _isPairingCodeNeeded.value = true
+    }
+
+    /**
+     * Brings the sound of the peer's call to this phone. Has to be started while the app is on screen.
+     */
+    fun startCallSound() {
+        val peer = _selectedPeer.value ?: return
+        CallAudioService.start(app, peer.ip, peer.port, peer.name, _peerTelemetry.value?.bluetoothSoundHost)
+    }
+
+    fun stopCallSound() {
+        CallAudioService.stop(app)
+    }
+
+    // Whether calls started or answered from this phone bring their sound along
+    fun toggleHearCallsHere(enabled: Boolean) {
+        app.callAudioRelay.isClientEnabled = enabled
+        _isHearingCallsHere.value = enabled
+        if (!enabled) stopCallSound()
+    }
+
+    fun toggleCallLoudspeaker(enabled: Boolean) {
+        app.callAudioRelay.isLoudspeakerOn = enabled
+        _isCallLoudspeakerOn.value = enabled
+    }
+
+    // Whether the call sound comes over Bluetooth when the two phones are paired there, with Wi-Fi as the fallback
+    fun toggleBluetoothSound(enabled: Boolean) {
+        app.bluetoothSoundLink.isPreferred = enabled
+        refreshLocalTelemetry()
+    }
+
+    /**
+     * Remembers the pairing code of the phone whose calls are controlled from here.
+     */
+    fun setPartnerPairingCode(code: String) {
+        app.pairing.partnerCode = code
+        _partnerPairingCode.value = app.pairing.partnerCode
+        _isPairingCodeNeeded.value = false
+    }
+
+    fun askForPairingCode(show: Boolean) {
+        _isPairingCodeNeeded.value = show
+    }
+
+    // Lets a paired device place, answer and end calls on this phone
+    fun toggleRemoteCalls(enabled: Boolean) {
+        app.callController.isEnabled = enabled
+        _isRemoteCallsAllowed.value = enabled
+    }
+
+    // Lets a paired device hear and talk on this phone's calls
+    fun toggleCallSoundRelay(enabled: Boolean) {
+        app.callAudioRelay.isHostEnabled = enabled
+        _isRelayingCallSound.value = enabled
+    }
+
     fun toggleNotificationSharing(enabled: Boolean) {
         DeviceNotificationStore.setSharingEnabled(app, enabled)
         _isSharingNotifications.value = enabled
+    }
+
+    fun togglePeerAlerts(enabled: Boolean) {
+        DeviceNotificationStore.setPeerAlertsEnabled(app, enabled)
+        _isPeerAlertsEnabled.value = enabled
+
+        val peer = _selectedPeer.value ?: return
+        viewModelScope.launch {
+            if (enabled) {
+                pulseClient.subscribeToNotifications(peer.ip, peer.port, serverPort.value)
+            } else {
+                pulseClient.unsubscribeFromNotifications(peer.ip, peer.port, serverPort.value)
+            }
+        }
     }
 
     fun fetchPeerTelemetry(ip: String, port: Int = 8765) {
@@ -183,6 +435,10 @@ class PulseViewModel(application: Application) : AndroidViewModel(application) {
                         telemetry = result.data
                     )
                     refreshPeerNotifications(ip, port)
+                    // Ask the peer to push its notifications here as they arrive
+                    if (_isPeerAlertsEnabled.value) {
+                        pulseClient.subscribeToNotifications(ip, port, serverPort.value)
+                    }
                 }
                 is NetworkResult.Error -> {
                     _peerLatencyMs.value = null

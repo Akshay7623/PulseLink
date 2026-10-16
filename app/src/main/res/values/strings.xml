@@ -1,3 +1,5 @@
 <resources>
     <string name="app_name">PulseLink</string>
+    <string name="accessibility_service_summary">Lets PulseLink relay the sound of a phone call to your other phone</string>
+    <string name="accessibility_service_description">PulseLink uses this only to keep the microphone working during a phone call, so the call\'s sound can be relayed to your paired phone when you turn on \"Relay Call Sound\". It does not read the screen or what you type.</string>
 </resources>

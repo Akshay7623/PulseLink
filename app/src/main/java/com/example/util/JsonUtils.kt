@@ -1,5 +1,6 @@
 package com.example.util
 
+import com.example.model.ChatMessage
 import com.example.model.DeviceNotification
 import com.example.model.DeviceTelemetry
 import com.example.model.NotificationPayload
@@ -34,6 +35,8 @@ object JsonUtils {
         json.put("freeStorageGb", telemetry.freeStorageGb)
         json.put("uptimeMinutes", telemetry.uptimeMinutes)
         json.put("isScreenOn", telemetry.isScreenOn)
+        telemetry.bluetoothHeadset?.let { json.put("bluetoothHeadset", it) }
+        telemetry.bluetoothSoundHost?.let { json.put("bluetoothSoundHost", it) }
         json.put("timestamp", telemetry.timestamp)
         return json
     }
@@ -61,6 +64,8 @@ object JsonUtils {
             freeStorageGb = json.optDouble("freeStorageGb", 0.0),
             uptimeMinutes = json.optLong("uptimeMinutes", 0L),
             isScreenOn = json.optBoolean("isScreenOn", true),
+            bluetoothHeadset = if (json.has("bluetoothHeadset")) json.optString("bluetoothHeadset", "") else null,
+            bluetoothSoundHost = if (json.has("bluetoothSoundHost")) json.optString("bluetoothSoundHost", "") else null,
             timestamp = json.optLong("timestamp", System.currentTimeMillis())
         )
     }
@@ -144,18 +149,83 @@ object JsonUtils {
         )
     }
 
+    fun deviceNotificationToJson(item: DeviceNotification): JSONObject {
+        val json = JSONObject()
+        json.put("key", item.key)
+        json.put("packageName", item.packageName)
+        json.put("appName", item.appName)
+        json.put("title", item.title)
+        json.put("text", item.text)
+        json.put("category", item.category)
+        json.put("postTime", item.postTime)
+        json.put("isChat", item.isChat)
+        json.put("canReply", item.canReply)
+        val messages = JSONArray()
+        item.messages.forEach { message ->
+            messages.put(
+                JSONObject()
+                    .put("sender", message.sender)
+                    .put("text", message.text)
+                    .put("time", message.time)
+                    .put("fromMe", message.fromMe)
+            )
+        }
+        json.put("messages", messages)
+        json.put("callState", item.callState)
+        return json
+    }
+
+    fun jsonToDeviceNotification(json: JSONObject): DeviceNotification {
+        val messagesJson = json.optJSONArray("messages") ?: JSONArray()
+        val messages = (0 until messagesJson.length()).mapNotNull { index ->
+            messagesJson.optJSONObject(index)?.let { message ->
+                ChatMessage(
+                    sender = message.optString("sender", ""),
+                    text = message.optString("text", ""),
+                    time = message.optLong("time", 0L),
+                    fromMe = message.optBoolean("fromMe", false)
+                )
+            }
+        }
+
+        return DeviceNotification(
+            key = json.optString("key", ""),
+            packageName = json.optString("packageName", ""),
+            appName = json.optString("appName", ""),
+            title = json.optString("title", ""),
+            text = json.optString("text", ""),
+            category = json.optString("category", ""),
+            postTime = json.optLong("postTime", System.currentTimeMillis()),
+            isChat = json.optBoolean("isChat", false),
+            canReply = json.optBoolean("canReply", false),
+            messages = messages,
+            callState = json.optString("callState", "")
+        )
+    }
+
+    /**
+     * Pushed to a subscribed peer whenever this device's notifications change.
+     * @param item the notification to alert about, or null when one only went away or changed silently
+     * @param activeKeys everything still showing, so the peer can drop whatever is no longer listed
+     */
+    fun notificationPushToJson(
+        senderDeviceName: String,
+        senderPort: Int,
+        item: DeviceNotification?,
+        activeKeys: List<String>
+    ): JSONObject {
+        val json = JSONObject()
+        json.put("senderDeviceName", senderDeviceName)
+        json.put("senderPort", senderPort)
+        item?.let { json.put("notification", deviceNotificationToJson(it)) }
+        json.put("activeKeys", JSONArray(activeKeys))
+        return json
+    }
+
     fun notificationFeedToJson(feed: PeerNotificationFeed): JSONObject {
         val items = JSONArray()
         feed.notifications.forEach { item ->
-            val itemJson = JSONObject()
-            itemJson.put("key", item.key)
-            itemJson.put("packageName", item.packageName)
-            itemJson.put("appName", item.appName)
-            itemJson.put("title", item.title)
-            itemJson.put("text", item.text)
-            itemJson.put("category", item.category)
-            itemJson.put("postTime", item.postTime)
-            items.put(itemJson)
+            items.put(deviceNotificationToJson(item))
         }
 
         val json = JSONObject()
@@ -168,17 +238,7 @@ object JsonUtils {
     fun jsonToNotificationFeed(json: JSONObject): PeerNotificationFeed {
         val items = json.optJSONArray("notifications") ?: JSONArray()
         val notifications = (0 until items.length()).mapNotNull { index ->
-            items.optJSONObject(index)?.let { itemJson ->
-                DeviceNotification(
-                    key = itemJson.optString("key", ""),
-                    packageName = itemJson.optString("packageName", ""),
-                    appName = itemJson.optString("appName", ""),
-                    title = itemJson.optString("title", ""),
-                    text = itemJson.optString("text", ""),
-                    category = itemJson.optString("category", ""),
-                    postTime = itemJson.optLong("postTime", System.currentTimeMillis())
-                )
-            }
+            items.optJSONObject(index)?.let { jsonToDeviceNotification(it) }
         }
 
         return PeerNotificationFeed(

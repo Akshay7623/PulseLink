@@ -46,10 +46,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.model.TelemetryStreamInterval
+import com.example.security.Pairing
 import com.example.ui.theme.CyanAccent
 import com.example.ui.theme.ElectricIndigo
 import com.example.ui.theme.EmeraldGlow
@@ -253,6 +255,65 @@ fun StreamIntervalDialog(
     )
 }
 
+/**
+ * Asks for the pairing code of the phone whose calls are controlled from this one.
+ */
+@Composable
+fun PairingCodeDialog(
+    peerName: String,
+    currentCode: String,
+    onDismiss: () -> Unit,
+    onSave: (String) -> Unit
+) {
+    var code by remember { mutableStateOf(Pairing.format(currentCode)) }
+    // Saving it empty forgets the code
+    val isComplete = Pairing.normalize(code).length == Pairing.CODE_LENGTH || code.isBlank()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Pairing code of $peerName") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    text = "On $peerName, open PulseLink settings and turn on \"Allow Remote Calls\". The 8-character pairing code appears below it.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                // Kept exactly as typed: rewriting it on every key makes some keyboards drop letters.
+                // Capitals, dashes and spaces are sorted out when it is saved.
+                OutlinedTextField(
+                    value = code,
+                    onValueChange = { code = it },
+                    label = { Text("Pairing code") },
+                    placeholder = { Text("ABCD-EFGH") },
+                    singleLine = true,
+                    isError = code.isNotEmpty() && !isComplete,
+                    keyboardOptions = KeyboardOptions(
+                        capitalization = KeyboardCapitalization.Characters,
+                        autoCorrectEnabled = false
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("pairing_code_input")
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { onSave(code) },
+                enabled = isComplete,
+                modifier = Modifier.testTag("pairing_code_save_btn")
+            ) {
+                Text("Save")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
 @Composable
 fun DeviceSettingsDialog(
     deviceName: String,
@@ -261,12 +322,27 @@ fun DeviceSettingsDialog(
     isBackgroundService: Boolean,
     isSharingNotifications: Boolean,
     hasNotificationAccess: Boolean,
+    isPeerAlertsEnabled: Boolean,
+    isRemoteCallsAllowed: Boolean,
+    hasPhonePermission: Boolean,
+    myPairingCode: String,
+    isRelayingCallSound: Boolean,
+    hasMicPermission: Boolean,
+    isAccessibilityOn: Boolean,
+    hasBluetoothPermission: Boolean,
     serverLogs: List<String>,
     onUpdateDeviceName: (String) -> Unit,
     onToggleServer: (Boolean) -> Unit,
     onToggleBackgroundService: (Boolean) -> Unit,
     onToggleNotificationSharing: (Boolean) -> Unit,
     onOpenNotificationAccess: () -> Unit,
+    onTogglePeerAlerts: (Boolean) -> Unit,
+    onToggleRemoteCalls: (Boolean) -> Unit,
+    onGrantPhonePermission: () -> Unit,
+    onToggleCallSoundRelay: (Boolean) -> Unit,
+    onGrantMicPermission: () -> Unit,
+    onOpenAccessibilitySettings: () -> Unit,
+    onGrantBluetoothPermission: () -> Unit,
     onDismiss: () -> Unit
 ) {
     var editName by remember { mutableStateOf(deviceName) }
@@ -356,8 +432,8 @@ fun DeviceSettingsDialog(
                         )
                         Text(
                             text = when {
-                                !isSharingNotifications -> "Let other PulseLink devices see this phone's app notifications (WhatsApp, SMS, calls)"
-                                hasNotificationAccess -> "On: any device on this network can read this phone's notifications"
+                                !isSharingNotifications -> "Let other PulseLink devices see this phone's app notifications (WhatsApp, SMS, calls) and reply to its chats"
+                                hasNotificationAccess -> "On: any device on this network can read and clear this phone's notifications, and reply to its chats"
                                 else -> "Notification access is not granted yet"
                             },
                             fontSize = 11.sp,
@@ -386,6 +462,177 @@ fun DeviceSettingsDialog(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         lineHeight = 13.sp
                     )
+                }
+
+                // Show The Connected Device's Notifications On This Phone Toggle
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Peer Notification Alerts",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = "Pop up the connected device's app notifications on this phone as they arrive. That device needs \"Share My Notifications\" on.",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = isPeerAlertsEnabled,
+                        onCheckedChange = onTogglePeerAlerts,
+                        modifier = Modifier.testTag("peer_alerts_toggle")
+                    )
+                }
+
+                // Let Other Devices Control This Phone's Calls Toggle
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Allow Remote Calls",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = when {
+                                !isRemoteCallsAllowed -> "Let other PulseLink devices dial numbers from this phone's SIM and answer or end its calls"
+                                hasPhonePermission -> "On: any device on this network can make calls from this phone's SIM, and answer or end its calls"
+                                else -> "Phone permission is not granted yet"
+                            },
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = isRemoteCallsAllowed,
+                        onCheckedChange = onToggleRemoteCalls,
+                        modifier = Modifier.testTag("remote_calls_toggle")
+                    )
+                }
+
+                if (isRemoteCallsAllowed && !hasPhonePermission) {
+                    OutlinedButton(
+                        onClick = onGrantPhonePermission,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("grant_phone_permission_btn")
+                    ) {
+                        Text("Grant Phone Permission")
+                    }
+                }
+
+                if (isRemoteCallsAllowed) {
+                    // Only a device that was given this code may use this phone's calls
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                    ) {
+                        Column(modifier = Modifier.padding(10.dp)) {
+                            Text(
+                                text = "Pairing code: $myPairingCode",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace,
+                                modifier = Modifier.testTag("my_pairing_code")
+                            )
+                            Text(
+                                text = "Type this once in the Call tab of the phone that controls this one",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    // Let The Paired Device Hear And Talk On This Phone's Calls Toggle
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Relay Call Sound",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = when {
+                                    !isRelayingCallSound -> "Experimental: let the paired device hear and talk on this phone's calls. The call plays on this phone's loudspeaker."
+                                    !hasMicPermission -> "Microphone permission is not granted yet"
+                                    !isAccessibilityOn -> "PulseLink is not turned on in Accessibility yet. Android mutes the microphone during calls without it."
+                                    else -> "On: the paired device can hear and talk on this phone's calls"
+                                },
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = isRelayingCallSound,
+                            onCheckedChange = onToggleCallSoundRelay,
+                            modifier = Modifier.testTag("relay_call_sound_toggle")
+                        )
+                    }
+
+                    if (isRelayingCallSound && !hasMicPermission) {
+                        OutlinedButton(
+                            onClick = onGrantMicPermission,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("grant_mic_permission_btn")
+                        ) {
+                            Text("Grant Microphone Permission")
+                        }
+                    }
+
+                    if (isRelayingCallSound && !isAccessibilityOn) {
+                        OutlinedButton(
+                            onClick = onOpenAccessibilitySettings,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("open_accessibility_btn")
+                        ) {
+                            Text("Open Accessibility Settings")
+                        }
+                        Text(
+                            text = "Choose PulseLink under Installed apps and turn it on. If Android says \"Restricted setting\": open Settings > Apps > PulseLink, tap the ⋮ menu, choose \"Allow restricted settings\", then try again.",
+                            fontSize = 10.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            lineHeight = 13.sp
+                        )
+                    }
+
+                    // The Same Sound Over Bluetooth Instead Of Wi-Fi
+                    if (isRelayingCallSound) {
+                        if (!hasBluetoothPermission) {
+                            OutlinedButton(
+                                onClick = onGrantBluetoothPermission,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("grant_bluetooth_permission_btn")
+                            ) {
+                                Text("Allow Bluetooth For Call Sound")
+                            }
+                        }
+                        Text(
+                            text = if (hasBluetoothPermission) {
+                                "Bluetooth: once the two phones are paired in Android's Bluetooth settings, the paired device can carry the call sound over Bluetooth instead of Wi-Fi."
+                            } else {
+                                "Optional: with the Nearby devices permission the paired device can carry the call sound over Bluetooth instead of Wi-Fi, once the two phones are paired in Android's Bluetooth settings."
+                            },
+                            fontSize = 10.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            lineHeight = 13.sp
+                        )
+                    }
                 }
 
                 // Live Server Packet Log

@@ -55,6 +55,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.model.DeviceNotification
 import com.example.model.DeviceTelemetry
 import com.example.model.PeerDevice
 import com.example.model.PeerNotificationFeed
@@ -76,6 +77,10 @@ fun TelemetryDashboardCard(
     onRemoteAction: (actionType: String, payload: String) -> Unit,
     onSelectPeerClick: () -> Unit,
     notificationFeed: PeerNotificationFeed?,
+    onDismissNotification: (DeviceNotification) -> Unit,
+    onReplyNotification: (DeviceNotification, String) -> Unit,
+    onAnswerCall: () -> Unit,
+    onEndCall: () -> Unit,
     streamIntervalSeconds: Int,
     onStreamIntervalChange: (Int) -> Unit,
     modifier: Modifier = Modifier
@@ -294,6 +299,10 @@ fun TelemetryDashboardCard(
                     // The peer's own app notifications (WhatsApp, SMS, calls)
                     PeerNotificationsCard(
                         feed = notificationFeed,
+                        onDismiss = onDismissNotification,
+                        onReply = onReplyNotification,
+                        onAnswerCall = onAnswerCall,
+                        onEndCall = onEndCall,
                         titlePrefix = "${peer.name.take(12)} Notifications"
                     )
 

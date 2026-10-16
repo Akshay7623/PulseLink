@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import com.example.call.BluetoothHeadset
 import android.net.wifi.WifiInfo
 import android.net.wifi.WifiManager
 import android.os.BatteryManager
@@ -20,7 +21,11 @@ import java.net.Inet4Address
 import java.net.NetworkInterface
 import java.util.Locale
 
-class TelemetryCollector(private val context: Context) {
+class TelemetryCollector(
+    private val context: Context,
+    // This device's Bluetooth name while it takes the call sound connection over Bluetooth, empty otherwise
+    private val bluetoothSoundHost: () -> String = { "" }
+) {
 
     fun collectTelemetry(customDeviceName: String? = null): DeviceTelemetry {
         val batteryInfo = getBatteryInfo()
@@ -54,6 +59,9 @@ class TelemetryCollector(private val context: Context) {
             freeStorageGb = storageInfo.freeGb,
             uptimeMinutes = uptimeMinutes,
             isScreenOn = isScreenOn,
+            // Empty rather than null: this device can tell, and none is connected
+            bluetoothHeadset = BluetoothHeadset.connectedName(context).orEmpty(),
+            bluetoothSoundHost = bluetoothSoundHost(),
             timestamp = System.currentTimeMillis()
         )
     }

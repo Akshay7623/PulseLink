@@ -19,9 +19,11 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -31,6 +33,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Campaign
+import androidx.compose.material.icons.filled.Dialpad
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.PhoneAndroid
@@ -75,10 +78,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.call.CallController
 import com.example.model.PeerDevice
+import com.example.security.Pairing
 import com.example.ui.PulseViewModel
 import com.example.ui.components.DeviceSettingsDialog
+import com.example.ui.components.DialPadCard
 import com.example.ui.components.DirectIpDialog
+import com.example.ui.components.PairingCodeDialog
 import com.example.ui.components.DiscoveryRadar
 import com.example.ui.components.HotspotGuideDialog
 import com.example.ui.components.LocalDeviceCard
@@ -111,6 +118,7 @@ class MainActivity : ComponentActivity() {
 enum class PulseTab(val label: String, val icon: androidx.compose.ui.graphics.vector.ImageVector) {
     TELEMETRY("Live Data", Icons.Default.Sensors),
     SEND_NOTIFY("Send", Icons.Default.Campaign),
+    CALL("Call", Icons.Default.Dialpad),
     INBOX("Inbox", Icons.Default.History),
     DEVICES("Radar", Icons.Default.Radar)
 }
@@ -141,6 +149,19 @@ fun PulseLinkApp(viewModel: PulseViewModel) {
     val peerNotificationFeed by viewModel.peerNotificationFeed.collectAsStateWithLifecycle()
     val isSharingNotifications by viewModel.isSharingNotifications.collectAsStateWithLifecycle()
     val hasNotificationAccess by viewModel.hasNotificationAccess.collectAsStateWithLifecycle()
+    val isPeerAlertsEnabled by viewModel.isPeerAlertsEnabled.collectAsStateWithLifecycle()
+    val isRemoteCallsAllowed by viewModel.isRemoteCallsAllowed.collectAsStateWithLifecycle()
+    val hasPhonePermission by viewModel.hasPhonePermission.collectAsStateWithLifecycle()
+    val partnerPairingCode by viewModel.partnerPairingCode.collectAsStateWithLifecycle()
+    val isPairingCodeNeeded by viewModel.isPairingCodeNeeded.collectAsStateWithLifecycle()
+    val callSoundState by viewModel.callSoundState.collectAsStateWithLifecycle()
+    val isHearingCallsHere by viewModel.isHearingCallsHere.collectAsStateWithLifecycle()
+    val isCallLoudspeakerOn by viewModel.isCallLoudspeakerOn.collectAsStateWithLifecycle()
+    val isRelayingCallSound by viewModel.isRelayingCallSound.collectAsStateWithLifecycle()
+    val hasMicPermission by viewModel.hasMicPermission.collectAsStateWithLifecycle()
+    val isAccessibilityOn by viewModel.isAccessibilityOn.collectAsStateWithLifecycle()
+    val hasBluetoothPermission by viewModel.hasBluetoothPermission.collectAsStateWithLifecycle()
+    val bluetoothSound by viewModel.bluetoothSound.collectAsStateWithLifecycle()
 
     var showDirectIpDialog by remember { mutableStateOf(false) }
     var showHotspotGuideDialog by remember { mutableStateOf(false) }
@@ -154,12 +175,53 @@ fun PulseLinkApp(viewModel: PulseViewModel) {
         contract = ActivityResultContracts.RequestPermission()
     ) { _ -> }
 
+    // Asked for only when the user turns on "Allow Remote Calls"
+    val phonePermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { granted ->
+        viewModel.refreshLocalTelemetry()
+        if (granted.values.any { !it }) {
+            scope.launch {
+                snackbarHostState.showSnackbar("Allow Phone in Settings > Apps > PulseLink > Permissions to use remote calls")
+            }
+        }
+    }
+
+    // Asked for only when the user turns on the call sound relay, on either phone
+    val micPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        viewModel.refreshLocalTelemetry()
+        if (!granted) {
+            scope.launch {
+                snackbarHostState.showSnackbar("Allow Microphone in Settings > Apps > PulseLink > Permissions to relay call sound")
+            }
+        }
+    }
+
+    // Asked for only when the user wants the call sound carried over Bluetooth, on either phone
+    val bluetoothPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        viewModel.refreshLocalTelemetry()
+        if (!granted) {
+            scope.launch {
+                snackbarHostState.showSnackbar("Allow Nearby devices in Settings > Apps > PulseLink > Permissions to use Bluetooth")
+            }
+        }
+    }
+
     LaunchedEffect(Unit) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
                 permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
             }
         }
+    }
+
+    // The dial pad says whether the peer has a Bluetooth headset connected, so ask afresh on opening it
+    LaunchedEffect(selectedTab, selectedPeer) {
+        if (selectedTab == PulseTab.CALL) viewModel.refreshPeerHeadset()
     }
 
     LaunchedEffect(lastSendResult) {
@@ -205,6 +267,15 @@ fun PulseLinkApp(viewModel: PulseViewModel) {
         HotspotGuideDialog(onDismiss = { showHotspotGuideDialog = false })
     }
 
+    if (isPairingCodeNeeded) {
+        PairingCodeDialog(
+            peerName = selectedPeer?.name ?: "the other phone",
+            currentCode = partnerPairingCode,
+            onDismiss = { viewModel.askForPairingCode(false) },
+            onSave = { viewModel.setPartnerPairingCode(it) }
+        )
+    }
+
     if (showSettingsDialog) {
         DeviceSettingsDialog(
             deviceName = localTelemetry.deviceName,
@@ -213,6 +284,14 @@ fun PulseLinkApp(viewModel: PulseViewModel) {
             isBackgroundService = isBackgroundServiceRunning,
             isSharingNotifications = isSharingNotifications,
             hasNotificationAccess = hasNotificationAccess,
+            isPeerAlertsEnabled = isPeerAlertsEnabled,
+            isRemoteCallsAllowed = isRemoteCallsAllowed,
+            hasPhonePermission = hasPhonePermission,
+            myPairingCode = viewModel.myPairingCode,
+            isRelayingCallSound = isRelayingCallSound,
+            hasMicPermission = hasMicPermission,
+            isAccessibilityOn = isAccessibilityOn,
+            hasBluetoothPermission = hasBluetoothPermission,
             serverLogs = serverLogs,
             onUpdateDeviceName = { viewModel.updateDeviceName(it) },
             onToggleServer = { viewModel.toggleServer(it, serverPort) },
@@ -227,6 +306,27 @@ fun PulseLinkApp(viewModel: PulseViewModel) {
                     }
                 }
             },
+            onTogglePeerAlerts = { viewModel.togglePeerAlerts(it) },
+            onToggleRemoteCalls = { enabled ->
+                viewModel.toggleRemoteCalls(enabled)
+                if (enabled && !hasPhonePermission) phonePermissionLauncher.launch(CallController.PERMISSIONS)
+            },
+            onGrantPhonePermission = { phonePermissionLauncher.launch(CallController.PERMISSIONS) },
+            onToggleCallSoundRelay = { enabled ->
+                viewModel.toggleCallSoundRelay(enabled)
+                if (enabled && !hasMicPermission) micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+            },
+            onGrantMicPermission = { micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO) },
+            onOpenAccessibilitySettings = {
+                try {
+                    context.startActivity(Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                } catch (e: Exception) {
+                    scope.launch {
+                        snackbarHostState.showSnackbar("Open Settings > Accessibility > Installed apps and turn on PulseLink")
+                    }
+                }
+            },
+            onGrantBluetoothPermission = { bluetoothPermissionLauncher.launch(Manifest.permission.BLUETOOTH_CONNECT) },
             onDismiss = { showSettingsDialog = false }
         )
     }
@@ -339,7 +439,10 @@ fun PulseLinkApp(viewModel: PulseViewModel) {
             modifier = Modifier
                 .fillMaxSize()
                 .background(MaterialTheme.colorScheme.background)
-                .padding(innerPadding),
+                .padding(innerPadding)
+                // The list ends above the keyboard, so a text field low on the screen scrolls into view
+                .consumeWindowInsets(innerPadding)
+                .imePadding(),
             contentAlignment = Alignment.TopCenter
         ) {
             LazyColumn(
@@ -383,6 +486,10 @@ fun PulseLinkApp(viewModel: PulseViewModel) {
                                 },
                                 onSelectPeerClick = { selectedTab = PulseTab.DEVICES },
                                 notificationFeed = peerNotificationFeed,
+                                onDismissNotification = { viewModel.dismissPeerNotification(it) },
+                                onReplyNotification = { item, text -> viewModel.replyToPeerNotification(item, text) },
+                                onAnswerCall = { viewModel.answerCallOnPeer() },
+                                onEndCall = { viewModel.endCallOnPeer() },
                                 streamIntervalSeconds = streamIntervalSeconds,
                                 onStreamIntervalChange = { viewModel.setStreamInterval(it) }
                             )
@@ -411,6 +518,38 @@ fun PulseLinkApp(viewModel: PulseViewModel) {
                                 },
                                 isSending = isSendingNotification,
                                 sendResult = lastSendResult
+                            )
+                        }
+                    }
+
+                    PulseTab.CALL -> {
+                        item {
+                            DialPadCard(
+                                peer = selectedPeer,
+                                isPaired = partnerPairingCode.length == Pairing.CODE_LENGTH,
+                                isHearingHere = isHearingCallsHere,
+                                callSound = callSoundState,
+                                isLoudspeakerOn = isCallLoudspeakerOn,
+                                peerHeadset = peerTelemetry?.bluetoothHeadset,
+                                bluetoothSound = bluetoothSound,
+                                onDial = { number, speaker -> viewModel.dialOnPeer(number, speaker) },
+                                onAnswer = { viewModel.answerCallOnPeer() },
+                                onHangUp = { viewModel.endCallOnPeer() },
+                                onEditPairingCode = { viewModel.askForPairingCode(true) },
+                                onToggleHearHere = { enabled ->
+                                    viewModel.toggleHearCallsHere(enabled)
+                                    if (enabled && !hasMicPermission) micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                },
+                                onStartCallSound = { viewModel.startCallSound() },
+                                onStopCallSound = { viewModel.stopCallSound() },
+                                onToggleLoudspeaker = { viewModel.toggleCallLoudspeaker(it) },
+                                onToggleBluetoothSound = { enabled ->
+                                    viewModel.toggleBluetoothSound(enabled)
+                                    if (enabled && !hasBluetoothPermission) {
+                                        bluetoothPermissionLauncher.launch(Manifest.permission.BLUETOOTH_CONNECT)
+                                    }
+                                },
+                                onSelectPeerClick = { selectedTab = PulseTab.DEVICES }
                             )
                         }
                     }
