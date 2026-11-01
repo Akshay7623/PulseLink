@@ -14,13 +14,13 @@
 <table>
   <tr>
     <td align="center"><img src="docs/screenshots/live-data.png" width="200" alt="Live Data tab showing Phone A's battery and status"><br><b>Live status</b></td>
-    <td align="center"><img src="docs/screenshots/videos.png" width="200" alt="Videos tab listing a video stored on the other phone"><br><b>Videos on the other phone</b></td>
-    <td align="center"><img src="docs/screenshots/call.png" width="200" alt="Call tab with a dial pad for calling from Phone A's SIM"><br><b>Call from Phone A's SIM</b></td>
+    <td align="center"><img src="docs/screenshots/videos.png" width="200" alt="Videos tab listing the folders on the other phone, with sorting by name or date"><br><b>Video folders on the other phone</b></td>
+    <td align="center"><img src="docs/screenshots/video-folder.png" width="200" alt="Inside a folder, with its videos sorted by name"><br><b>Sort by name or date</b></td>
   </tr>
   <tr>
+    <td align="center"><img src="docs/screenshots/call.png" width="200" alt="Call tab with a dial pad for calling from Phone A's SIM"><br><b>Call from Phone A's SIM</b></td>
     <td align="center"><img src="docs/screenshots/send.png" width="200" alt="Send tab for writing a notification to the other phone"><br><b>Send an alert</b></td>
     <td align="center"><img src="docs/screenshots/radar.png" width="200" alt="Radar tab for finding and connecting to the other phone"><br><b>Connect the phones</b></td>
-    <td></td>
   </tr>
 </table>
 
@@ -153,7 +153,9 @@ Now Phone A's notifications pop up on Phone B, and they also show in Phone B's *
 **On Phone B:**
 1. Connect to Phone A (Step 2) and open the **Videos** tab.
 2. Tap **Enter code**, type Phone A's code, and tap **Save**. You only do this once.
-3. Tap a video to play it. Drag the bar to skip. Next time, it continues from where you stopped.
+3. Your videos appear in their **folders**. Tap a folder to open it, and tap a video to play it. Drag the bar to skip. Next time, it continues from where you stopped.
+4. To change the order, tap **Name** or **Date**, then tap the arrow next to them to switch between **A to Z** and **Z to A**, or **Newest first** and **Oldest first**. PulseLink remembers your choice.
+5. To find a video in any folder, type its name in the search box on the folder list.
 
 **Watch from anywhere (phones in different places):**
 1. Install the free **[Tailscale](https://tailscale.com/download)** app on both phones, sign in to the **same account** on both, and switch it on.

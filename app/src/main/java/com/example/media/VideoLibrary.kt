@@ -49,7 +49,7 @@ class VideoLibrary(private val context: Context) {
     }
 
     /**
-     * @return every video on this device, newest first
+     * @return every video on this device. The device showing them decides how to group and sort them.
      */
     fun list(): List<SharedVideo> {
         val projection = arrayOf(
@@ -60,7 +60,8 @@ class VideoLibrary(private val context: Context) {
             MediaStore.Video.Media.SIZE,
             MediaStore.Video.Media.WIDTH,
             MediaStore.Video.Media.HEIGHT,
-            MediaStore.Video.Media.DATE_ADDED
+            MediaStore.Video.Media.DATE_ADDED,
+            MediaStore.Video.Media.BUCKET_ID
         )
         val videos = mutableListOf<SharedVideo>()
         context.contentResolver.query(
@@ -79,7 +80,8 @@ class VideoLibrary(private val context: Context) {
                     sizeBytes = cursor.getLong(4),
                     width = cursor.getInt(5),
                     height = cursor.getInt(6),
-                    dateAddedSeconds = cursor.getLong(7)
+                    dateAddedSeconds = cursor.getLong(7),
+                    folderId = cursor.getLong(8)
                 )
             }
         }

@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -30,6 +31,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -77,6 +79,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -84,6 +87,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.call.CallController
 import com.example.media.VideoLibrary
 import com.example.model.PeerDevice
+import com.example.model.toFolders
 import com.example.security.Pairing
 import com.example.ui.PulseViewModel
 import com.example.ui.components.DeviceSettingsDialog
@@ -96,6 +100,7 @@ import com.example.ui.components.LocalDeviceCard
 import com.example.ui.components.NotificationComposer
 import com.example.ui.components.NotificationHistoryList
 import com.example.ui.components.TelemetryDashboardCard
+import com.example.ui.components.VideoFolderRow
 import com.example.ui.components.VideoLibraryCard
 import com.example.ui.components.VideoRow
 import com.example.ui.theme.CyanAccent
@@ -172,8 +177,27 @@ fun PulseLinkApp(viewModel: PulseViewModel) {
     val isSharingVideos by viewModel.isSharingVideos.collectAsStateWithLifecycle()
     val hasVideoPermission by viewModel.hasVideoPermission.collectAsStateWithLifecycle()
     val peerVideos by viewModel.peerVideos.collectAsStateWithLifecycle()
+    val videoSort by viewModel.videoSort.collectAsStateWithLifecycle()
 
+    val listState = rememberLazyListState()
     var videoSearch by rememberSaveable { mutableStateOf("") }
+    var openVideoFolderId by rememberSaveable { mutableStateOf<Long?>(null) }
+    var folderListScrollIndex by rememberSaveable { mutableIntStateOf(0) }
+    val videoFolders = remember(peerVideos.videos, videoSort) {
+        peerVideos.videos.toFolders().sortedWith(videoSort.folderOrder)
+    }
+    val openVideoFolder = videoFolders.firstOrNull { it.id == openVideoFolderId }
+    // The open folder's videos, or the matches across all folders while searching from the folder list
+    val visibleVideos = remember(peerVideos.videos, openVideoFolder, videoSearch, videoSort) {
+        val query = videoSearch.trim()
+        (openVideoFolder?.videos ?: peerVideos.videos)
+            .filter { query.isEmpty() || it.name.contains(query, ignoreCase = true) }
+            .sortedWith(videoSort.videoOrder)
+    }
+    val closeVideoFolder = {
+        videoSearch = ""
+        openVideoFolderId = null
+    }
     var showDirectIpDialog by remember { mutableStateOf(false) }
     var showHotspotGuideDialog by remember { mutableStateOf(false) }
     var showSettingsDialog by remember { mutableStateOf(false) }
@@ -250,6 +274,23 @@ fun PulseLinkApp(viewModel: PulseViewModel) {
     // Also runs again once a pairing code is saved, so the videos appear without another tap
     LaunchedEffect(selectedTab, selectedPeer, partnerPairingCode) {
         if (selectedTab == PulseTab.VIDEOS) viewModel.refreshPeerVideos()
+    }
+
+    // Two phones can have the same folder, so the one open on the last phone must not carry over
+    LaunchedEffect(selectedPeer?.ip) {
+        videoSearch = ""
+        openVideoFolderId = null
+        folderListScrollIndex = 0
+    }
+
+    // A folder opens at its top, and coming back to the folder list returns to the same place
+    LaunchedEffect(openVideoFolderId) {
+        listState.scrollToItem(if (openVideoFolderId == null) folderListScrollIndex else 0)
+    }
+
+    // Inside a folder, Back returns to the folders instead of closing the app
+    BackHandler(enabled = selectedTab == PulseTab.VIDEOS && openVideoFolder != null) {
+        closeVideoFolder()
     }
 
     LaunchedEffect(lastSendResult) {
@@ -481,6 +522,7 @@ fun PulseLinkApp(viewModel: PulseViewModel) {
             contentAlignment = Alignment.TopCenter
         ) {
             LazyColumn(
+                state = listState,
                 modifier = Modifier
                     .fillMaxSize()
                     .widthIn(max = 680.dp)
@@ -488,14 +530,16 @@ fun PulseLinkApp(viewModel: PulseViewModel) {
                 contentPadding = PaddingValues(top = 10.dp, bottom = 24.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                // Persistent Local Device Status Header Card
-                item {
-                    LocalDeviceCard(
-                        telemetry = localTelemetry,
-                        isServerRunning = isServerRunning,
-                        serverPort = serverPort,
-                        onEditSettingsClick = { showSettingsDialog = true }
-                    )
+                // Persistent Local Device Status Header Card. The Videos tab needs the room for its list.
+                if (selectedTab != PulseTab.VIDEOS) {
+                    item {
+                        LocalDeviceCard(
+                            telemetry = localTelemetry,
+                            isServerRunning = isServerRunning,
+                            serverPort = serverPort,
+                            onEditSettingsClick = { showSettingsDialog = true }
+                        )
+                    }
                 }
 
                 // Dynamic Body based on Selected Tab
@@ -594,29 +638,56 @@ fun PulseLinkApp(viewModel: PulseViewModel) {
                             VideoLibraryCard(
                                 peer = selectedPeer,
                                 library = peerVideos,
+                                folderCount = videoFolders.size,
+                                openFolder = openVideoFolder,
                                 isPaired = partnerPairingCode.length == Pairing.CODE_LENGTH,
                                 search = videoSearch,
+                                sort = videoSort,
                                 onSearchChange = { videoSearch = it },
+                                onSortChange = { viewModel.setVideoSort(it) },
+                                onCloseFolder = closeVideoFolder,
                                 onRefresh = { viewModel.refreshPeerVideos() },
                                 onEditPairingCode = { viewModel.askForPairingCode(true) },
                                 onSelectPeerClick = { selectedTab = PulseTab.DEVICES }
                             )
                         }
                         selectedPeer?.let { peer ->
-                            val visibleVideos = peerVideos.videos.filter {
-                                videoSearch.isBlank() ||
-                                    it.name.contains(videoSearch.trim(), ignoreCase = true) ||
-                                    it.folder.contains(videoSearch.trim(), ignoreCase = true)
-                            }
-                            items(visibleVideos, key = { it.id }) { video ->
-                                VideoRow(
-                                    video = video,
-                                    peer = peer,
-                                    token = peerVideos.token,
-                                    onPlay = {
-                                        VideoPlayerActivity.start(context, peer.ip, peer.port, video.id, video.name)
+                            // Folders show until the user opens one or searches
+                            if (openVideoFolder == null && videoSearch.isBlank()) {
+                                items(videoFolders, key = { "folder_${it.id}" }) { folder ->
+                                    VideoFolderRow(
+                                        folder = folder,
+                                        onOpen = {
+                                            folderListScrollIndex = listState.firstVisibleItemIndex
+                                            videoSearch = ""
+                                            openVideoFolderId = folder.id
+                                        }
+                                    )
+                                }
+                            } else {
+                                items(visibleVideos, key = { it.id }) { video ->
+                                    VideoRow(
+                                        video = video,
+                                        peer = peer,
+                                        token = peerVideos.token,
+                                        showFolder = openVideoFolder == null,
+                                        onPlay = {
+                                            VideoPlayerActivity.start(context, peer.ip, peer.port, video.id, video.name)
+                                        }
+                                    )
+                                }
+                                if (visibleVideos.isEmpty()) {
+                                    item {
+                                        Text(
+                                            text = "No videos match \"${videoSearch.trim()}\"",
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(16.dp),
+                                            textAlign = TextAlign.Center,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
                                     }
-                                )
+                                }
                             }
                         }
                     }

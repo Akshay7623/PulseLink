@@ -19,6 +19,8 @@ import com.example.model.PeerVideoLibrary
 import com.example.model.RemoteActionRequest
 import com.example.model.TelemetryStreamInterval
 import com.example.model.VideoAccess
+import com.example.model.VideoSort
+import com.example.model.VideoSortField
 import com.example.network.NetworkResult
 import com.example.notification.DeviceNotificationStore
 import com.example.security.Pairing
@@ -152,6 +154,17 @@ class PulseViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _peerVideos = MutableStateFlow(PeerVideoLibrary())
     val peerVideos: StateFlow<PeerVideoLibrary> = _peerVideos.asStateFlow()
+
+    private val _videoSort = MutableStateFlow(
+        application.getSharedPreferences("pulselink_prefs", Context.MODE_PRIVATE).let { prefs ->
+            VideoSort(
+                sortBy = VideoSortField.entries.firstOrNull { it.name == prefs.getString("video_sort_field", null) }
+                    ?: VideoSortField.DATE,
+                ascending = prefs.getBoolean("video_sort_ascending", false)
+            )
+        }
+    )
+    val videoSort: StateFlow<VideoSort> = _videoSort.asStateFlow()
 
     private var telemetryStreamJob: Job? = null
     private var localTelemetryTickerJob: Job? = null
@@ -426,6 +439,15 @@ class PulseViewModel(application: Application) : AndroidViewModel(application) {
                 is NetworkResult.Error -> PeerVideoLibrary(access = VideoAccess.FAILED)
             }
         }
+    }
+
+    fun setVideoSort(sort: VideoSort) {
+        _videoSort.value = sort
+        app.getSharedPreferences("pulselink_prefs", Context.MODE_PRIVATE)
+            .edit()
+            .putString("video_sort_field", sort.sortBy.name)
+            .putBoolean("video_sort_ascending", sort.ascending)
+            .apply()
     }
 
     // Lets a paired device watch the videos on this phone

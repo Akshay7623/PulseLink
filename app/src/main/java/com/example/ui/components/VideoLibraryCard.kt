@@ -15,6 +15,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.ArrowDownward
+import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
@@ -23,6 +28,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -48,23 +54,32 @@ import com.example.model.PeerDevice
 import com.example.model.PeerVideoLibrary
 import com.example.model.SharedVideo
 import com.example.model.VideoAccess
+import com.example.model.VideoFolder
+import com.example.model.VideoSort
+import com.example.model.VideoSortField
+import com.example.model.videoCountText
 import com.example.network.PulseClient
 import com.example.security.StreamTokens
 import com.example.ui.theme.EmeraldCharging
 import com.example.ui.theme.RoseAlert
 
 /**
- * The top of the Videos tab: which phone the videos are on, what is stopping them from showing, and
- * a search box. The videos themselves are separate items of the page's list, so a phone with
- * hundreds of them still scrolls smoothly.
+ * The top of the Videos tab: which phone the videos are on, what is stopping them from showing, the
+ * folder that is open, and the search and sort controls. The folders and videos themselves are
+ * separate items of the page's list, so a phone with hundreds of them still scrolls smoothly.
  */
 @Composable
 fun VideoLibraryCard(
     peer: PeerDevice?,
     library: PeerVideoLibrary,
+    folderCount: Int,
+    openFolder: VideoFolder?,
     isPaired: Boolean,
     search: String,
+    sort: VideoSort,
     onSearchChange: (String) -> Unit,
+    onSortChange: (VideoSort) -> Unit,
+    onCloseFolder: () -> Unit,
     onRefresh: () -> Unit,
     onEditPairingCode: () -> Unit,
     onSelectPeerClick: () -> Unit,
@@ -128,23 +143,26 @@ fun VideoLibraryCard(
                 return@Column
             }
 
-            // The other phone only lets in a device that knows its pairing code
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = if (isPaired) "Pairing code saved" else "Pairing code of ${peer.name} needed",
-                    modifier = Modifier.weight(1f),
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = if (isPaired) EmeraldCharging else RoseAlert
-                )
-                TextButton(
-                    onClick = onEditPairingCode,
-                    modifier = Modifier.testTag("videos_pairing_code_btn")
+            // The other phone only lets in a device that knows its pairing code. Once it has let this
+            // one in there is nothing to do here, and the room is better used for the videos.
+            if (library.access != VideoAccess.OK) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(if (isPaired) "Change" else "Enter code")
+                    Text(
+                        text = if (isPaired) "Pairing code saved" else "Pairing code of ${peer.name} needed",
+                        modifier = Modifier.weight(1f),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (isPaired) EmeraldCharging else RoseAlert
+                    )
+                    TextButton(
+                        onClick = onEditPairingCode,
+                        modifier = Modifier.testTag("videos_pairing_code_btn")
+                    ) {
+                        Text(if (isPaired) "Change" else "Enter code")
+                    }
                 }
             }
 
@@ -172,24 +190,82 @@ fun VideoLibraryCard(
             }
 
             if (library.access == VideoAccess.OK && library.videos.isNotEmpty()) {
-                Text(
-                    text = (if (library.videos.size == 1) "1 video" else "${library.videos.size} videos") +
-                        ". Watching uses data on both phones, up to the size of the file.",
-                    fontSize = 11.sp,
-                    lineHeight = 15.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                if (openFolder != null) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(
+                            onClick = onCloseFolder,
+                            modifier = Modifier.testTag("videos_close_folder_btn")
+                        ) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to Folders")
+                        }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = openFolder.name,
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = openFolder.summaryText,
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                } else {
+                    Text(
+                        text = "${videoCountText(library.videos.size)} in " +
+                            (if (folderCount == 1) "1 folder" else "$folderCount folders") +
+                            ". Watching uses data on both phones, up to the size of the file.",
+                        fontSize = 11.sp,
+                        lineHeight = 15.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
                 Spacer(modifier = Modifier.height(10.dp))
                 OutlinedTextField(
                     value = search,
                     onValueChange = onSearchChange,
-                    placeholder = { Text("Search by name or folder") },
+                    placeholder = { Text(if (openFolder != null) "Search this folder" else "Search all videos") },
                     leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                     singleLine = true,
                     modifier = Modifier
                         .fillMaxWidth()
                         .testTag("videos_search_input")
                 )
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    FilterChip(
+                        selected = sort.sortBy == VideoSortField.NAME,
+                        onClick = { onSortChange(sort.withField(VideoSortField.NAME)) },
+                        label = { Text("Name") },
+                        modifier = Modifier.testTag("videos_sort_name")
+                    )
+                    FilterChip(
+                        selected = sort.sortBy == VideoSortField.DATE,
+                        onClick = { onSortChange(sort.withField(VideoSortField.DATE)) },
+                        label = { Text("Date") },
+                        modifier = Modifier.testTag("videos_sort_date")
+                    )
+                    Spacer(modifier = Modifier.weight(1f))
+                    TextButton(
+                        onClick = { onSortChange(sort.flipped()) },
+                        modifier = Modifier.testTag("videos_sort_direction")
+                    ) {
+                        Icon(
+                            imageVector = if (sort.ascending) Icons.Default.ArrowUpward else Icons.Default.ArrowDownward,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(sort.directionText)
+                    }
+                }
             }
         }
     }
@@ -238,18 +314,109 @@ private fun VideoLibraryNotice(
 }
 
 /**
+ * One folder on the connected device. Tapping it shows the videos inside.
+ */
+@Composable
+fun VideoFolderRow(
+    folder: VideoFolder,
+    onOpen: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .clickable(onClick = onOpen)
+            .testTag("video_folder_${folder.id}"),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        )
+    ) {
+        Row(
+            modifier = Modifier.padding(10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Default.Folder,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(40.dp)
+            )
+
+            Spacer(modifier = Modifier.width(12.dp))
+
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                Text(
+                    text = folder.name,
+                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = folder.summaryText,
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+private fun VideoThumbnail(videoId: Long, peer: PeerDevice, token: String) {
+    val context = LocalContext.current
+
+    Box(
+        modifier = Modifier
+            .width(112.dp)
+            .height(64.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = Icons.Default.PlayCircle,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        AsyncImage(
+            model = ImageRequest.Builder(context)
+                .data(PulseClient.videoThumbnailUrl(peer.ip, peer.port, videoId))
+                .addHeader(StreamTokens.HEADER, token)
+                .crossfade(true)
+                .build(),
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.fillMaxSize()
+        )
+    }
+}
+
+/**
  * One video on the connected device. Tapping it starts playing.
+ *
+ * @param showFolder false inside a folder, where its name is already on screen
  */
 @Composable
 fun VideoRow(
     video: SharedVideo,
     peer: PeerDevice,
     token: String,
+    showFolder: Boolean,
     onPlay: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val context = LocalContext.current
-
     Card(
         modifier = modifier
             .fillMaxWidth()
@@ -265,30 +432,7 @@ fun VideoRow(
             modifier = Modifier.padding(10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Box(
-                modifier = Modifier
-                    .width(112.dp)
-                    .height(64.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.PlayCircle,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                AsyncImage(
-                    model = ImageRequest.Builder(context)
-                        .data(PulseClient.videoThumbnailUrl(peer.ip, peer.port, video.id))
-                        .addHeader(StreamTokens.HEADER, token)
-                        .crossfade(true)
-                        .build(),
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
+            VideoThumbnail(videoId = video.id, peer = peer, token = token)
 
             Spacer(modifier = Modifier.width(12.dp))
 
@@ -310,7 +454,7 @@ fun VideoRow(
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                if (video.folder.isNotEmpty()) {
+                if (showFolder && video.folder.isNotEmpty()) {
                     Text(
                         text = video.folder,
                         fontSize = 11.sp,

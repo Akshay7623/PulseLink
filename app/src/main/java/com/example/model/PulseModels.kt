@@ -146,6 +146,7 @@ data class SharedVideo(
     val id: Long = 0,
     val name: String = "",
     val folder: String = "",
+    val folderId: Long = 0,
     val durationMs: Long = 0,
     val sizeBytes: Long = 0,
     val width: Int = 0,
@@ -162,11 +163,7 @@ data class SharedVideo(
         }
 
     val sizeText: String
-        get() = when {
-            sizeBytes >= 1_000_000_000 -> "%.1f GB".format(sizeBytes / 1_000_000_000.0)
-            sizeBytes >= 1_000_000 -> "%d MB".format(sizeBytes / 1_000_000)
-            else -> "%d KB".format(sizeBytes / 1_000)
-        }
+        get() = formatVideoSize(sizeBytes)
 
     // Named after the shorter side, so a video filmed upright reads the same as a wide one
     val qualityText: String
@@ -178,6 +175,12 @@ data class SharedVideo(
                 else -> ""
             }
         }
+}
+
+fun formatVideoSize(bytes: Long): String = when {
+    bytes >= 1_000_000_000 -> "%.1f GB".format(bytes / 1_000_000_000.0)
+    bytes >= 1_000_000 -> "%d MB".format(bytes / 1_000_000)
+    else -> "%d KB".format(bytes / 1_000)
 }
 
 /**

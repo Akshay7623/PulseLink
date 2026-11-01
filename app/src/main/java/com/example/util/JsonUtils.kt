@@ -257,6 +257,7 @@ object JsonUtils {
                     .put("id", video.id)
                     .put("name", video.name)
                     .put("folder", video.folder)
+                    .put("folderId", video.folderId)
                     .put("durationMs", video.durationMs)
                     .put("sizeBytes", video.sizeBytes)
                     .put("width", video.width)
@@ -275,6 +276,7 @@ object JsonUtils {
                     id = video.optLong("id", 0L),
                     name = video.optString("name", ""),
                     folder = video.optString("folder", ""),
+                    folderId = video.optLong("folderId", 0L),
                     durationMs = video.optLong("durationMs", 0L),
                     sizeBytes = video.optLong("sizeBytes", 0L),
                     width = video.optInt("width", 0),
