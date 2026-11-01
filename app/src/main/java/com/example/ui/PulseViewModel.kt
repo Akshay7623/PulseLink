@@ -15,8 +15,10 @@ import com.example.model.DeviceTelemetry
 import com.example.model.NotificationPayload
 import com.example.model.PeerDevice
 import com.example.model.PeerNotificationFeed
+import com.example.model.PeerVideoLibrary
 import com.example.model.RemoteActionRequest
 import com.example.model.TelemetryStreamInterval
+import com.example.model.VideoAccess
 import com.example.network.NetworkResult
 import com.example.notification.DeviceNotificationStore
 import com.example.security.Pairing
@@ -142,8 +144,18 @@ class PulseViewModel(application: Application) : AndroidViewModel(application) {
     private val _bluetoothSound = MutableStateFlow(app.bluetoothSoundLink.state(null))
     val bluetoothSound: StateFlow<BluetoothSoundState> = _bluetoothSound.asStateFlow()
 
+    private val _isSharingVideos = MutableStateFlow(app.videoLibrary.isSharingEnabled)
+    val isSharingVideos: StateFlow<Boolean> = _isSharingVideos.asStateFlow()
+
+    private val _hasVideoPermission = MutableStateFlow(app.videoLibrary.hasPermission())
+    val hasVideoPermission: StateFlow<Boolean> = _hasVideoPermission.asStateFlow()
+
+    private val _peerVideos = MutableStateFlow(PeerVideoLibrary())
+    val peerVideos: StateFlow<PeerVideoLibrary> = _peerVideos.asStateFlow()
+
     private var telemetryStreamJob: Job? = null
     private var localTelemetryTickerJob: Job? = null
+    private var peerVideosJob: Job? = null
 
     init {
         val prefs = application.getSharedPreferences("pulselink_prefs", Context.MODE_PRIVATE)
@@ -179,6 +191,7 @@ class PulseViewModel(application: Application) : AndroidViewModel(application) {
         _isAccessibilityOn.value = app.callAudioRelay.isAccessibilityOn()
         _hasBluetoothPermission.value = app.bluetoothSoundLink.hasPermission()
         _bluetoothSound.value = app.bluetoothSoundLink.state(_peerTelemetry.value?.bluetoothSoundHost)
+        _hasVideoPermission.value = app.videoLibrary.hasPermission()
         // Picks up the Nearby devices permission being granted while "Relay Call Sound" is already on
         app.callAudioRelay.syncBluetoothHost()
     }
@@ -215,6 +228,8 @@ class PulseViewModel(application: Application) : AndroidViewModel(application) {
         val previous = _selectedPeer.value
         if (previous?.ip != newIp) {
             _peerNotificationFeed.value = null
+            peerVideosJob?.cancel()
+            _peerVideos.value = PeerVideoLibrary()
             // Alerts follow the selected peer, so the one being left should stop pushing here
             if (previous != null) {
                 viewModelScope.launch {
@@ -386,6 +401,38 @@ class PulseViewModel(application: Application) : AndroidViewModel(application) {
 
     fun askForPairingCode(show: Boolean) {
         _isPairingCodeNeeded.value = show
+    }
+
+    /**
+     * Asks the connected device again which videos it has. What is showing stays until the answer
+     * comes, so opening the tab again does not make the list flicker.
+     */
+    fun refreshPeerVideos() {
+        val peer = _selectedPeer.value ?: return
+        peerVideosJob?.cancel()
+        peerVideosJob = viewModelScope.launch {
+            _peerVideos.value = _peerVideos.value.copy(isLoading = true)
+            val session = pulseClient.openVideoSession(peer.ip, peer.port, app.pairing.partnerKey())
+            if (session.access != VideoAccess.OK) {
+                _peerVideos.value = PeerVideoLibrary(access = session.access)
+                return@launch
+            }
+            _peerVideos.value = when (val result = pulseClient.fetchVideos(peer.ip, peer.port, session.token)) {
+                is NetworkResult.Success -> PeerVideoLibrary(
+                    access = VideoAccess.OK,
+                    token = session.token,
+                    videos = result.data
+                )
+                is NetworkResult.Error -> PeerVideoLibrary(access = VideoAccess.FAILED)
+            }
+        }
+    }
+
+    // Lets a paired device watch the videos on this phone
+    fun toggleVideoSharing(enabled: Boolean) {
+        app.videoLibrary.isSharingEnabled = enabled
+        _isSharingVideos.value = enabled
+        if (!enabled) app.streamTokens.clear()
     }
 
     // Lets a paired device place, answer and end calls on this phone

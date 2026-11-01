@@ -7,7 +7,11 @@ import com.example.model.NotificationPayload
 import com.example.model.PeerNotificationFeed
 import com.example.model.RemoteActionRequest
 import com.example.model.RemoteActionResponse
+import com.example.model.SharedVideo
+import com.example.model.VideoAccess
+import com.example.model.VideoSession
 import com.example.security.Pairing
+import com.example.security.StreamTokens
 import com.example.util.JsonUtils
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -33,6 +37,17 @@ sealed class NetworkResult<out T> {
 }
 
 class PulseClient {
+
+    companion object {
+        // A phone that is far away over the internet answers more slowly than one on the same Wi-Fi
+        private const val VIDEO_TIMEOUT_MS = 15_000
+
+        fun videoStreamUrl(targetIp: String, targetPort: Int, videoId: Long): String =
+            "http://$targetIp:$targetPort/api/media/stream/$videoId"
+
+        fun videoThumbnailUrl(targetIp: String, targetPort: Int, videoId: Long): String =
+            "http://$targetIp:$targetPort/api/media/thumb/$videoId"
+    }
 
     suspend fun sendNotification(
         targetIp: String,
@@ -238,6 +253,74 @@ class PulseClient {
         // Peer runs an older PulseLink that has no call control
         404 -> NetworkResult.Success(CallResult.UNSUPPORTED)
         else -> error
+    }
+
+    /**
+     * Asks the peer for a pass to watch its videos, proving this device has the peer's pairing code.
+     *
+     * @param pairingKey from the peer's pairing code, null when the user has not entered it yet
+     */
+    suspend fun openVideoSession(
+        targetIp: String,
+        targetPort: Int,
+        pairingKey: ByteArray?
+    ): VideoSession {
+        if (pairingKey == null) return VideoSession(VideoAccess.NOT_PAIRED)
+
+        val path = "/api/media/session"
+        val body = JSONObject()
+        val nonce = when (val challenge = postJson(targetIp, targetPort, "/api/auth/challenge", JSONObject(), timeoutMs = VIDEO_TIMEOUT_MS)) {
+            is NetworkResult.Success -> challenge.data.optString("nonce", "")
+            is NetworkResult.Error -> return VideoSession(videoFailure(challenge))
+        }
+        val headers = mapOf(
+            Pairing.HEADER_NONCE to nonce,
+            Pairing.HEADER_SIGNATURE to Pairing.sign(pairingKey, nonce, "POST", path, body.toString())
+        )
+
+        return when (val result = postJson(targetIp, targetPort, path, body, timeoutMs = VIDEO_TIMEOUT_MS, headers = headers)) {
+            is NetworkResult.Success ->
+                if (result.data.optBoolean("ok", false)) {
+                    VideoSession(VideoAccess.OK, result.data.optString("token", ""))
+                } else {
+                    VideoSession(VideoAccess.fromReason(result.data.optString("reason", "")))
+                }
+            is NetworkResult.Error -> VideoSession(videoFailure(result))
+        }
+    }
+
+    private fun videoFailure(error: NetworkResult.Error): VideoAccess = when (error.httpCode) {
+        403 -> VideoAccess.NOT_PAIRED
+        // Peer runs an older PulseLink that does not share videos
+        404 -> VideoAccess.UNSUPPORTED
+        else -> VideoAccess.FAILED
+    }
+
+    suspend fun fetchVideos(
+        targetIp: String,
+        targetPort: Int,
+        token: String
+    ): NetworkResult<List<SharedVideo>> = withContext(Dispatchers.IO) {
+        try {
+            val url = URL("http://$targetIp:$targetPort/api/media/list")
+            val conn = (url.openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = VIDEO_TIMEOUT_MS
+                readTimeout = VIDEO_TIMEOUT_MS
+                setRequestProperty("Accept", "application/json")
+                setRequestProperty(StreamTokens.HEADER, token)
+            }
+
+            val code = conn.responseCode
+            if (code == 200) {
+                val responseText = conn.inputStream.bufferedReader().use { it.readText() }
+                NetworkResult.Success(JsonUtils.jsonToVideos(JSONObject(responseText)))
+            } else {
+                NetworkResult.Error("Failed to fetch videos (HTTP $code)", httpCode = code)
+            }
+        } catch (e: Exception) {
+            NetworkResult.Error(e.localizedMessage ?: "Cannot reach $targetIp:$targetPort", e)
+        }
     }
 
     /**

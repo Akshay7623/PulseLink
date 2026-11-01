@@ -7,6 +7,7 @@ import com.example.model.NotificationPayload
 import com.example.model.PeerNotificationFeed
 import com.example.model.RemoteActionRequest
 import com.example.model.RemoteActionResponse
+import com.example.model.SharedVideo
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -246,5 +247,41 @@ object JsonUtils {
             accessGranted = json.optBoolean("accessGranted", false),
             notifications = notifications
         )
+    }
+
+    fun videosToJson(videos: List<SharedVideo>): JSONObject {
+        val items = JSONArray()
+        videos.forEach { video ->
+            items.put(
+                JSONObject()
+                    .put("id", video.id)
+                    .put("name", video.name)
+                    .put("folder", video.folder)
+                    .put("durationMs", video.durationMs)
+                    .put("sizeBytes", video.sizeBytes)
+                    .put("width", video.width)
+                    .put("height", video.height)
+                    .put("dateAddedSeconds", video.dateAddedSeconds)
+            )
+        }
+        return JSONObject().put("videos", items)
+    }
+
+    fun jsonToVideos(json: JSONObject): List<SharedVideo> {
+        val items = json.optJSONArray("videos") ?: JSONArray()
+        return (0 until items.length()).mapNotNull { index ->
+            items.optJSONObject(index)?.let { video ->
+                SharedVideo(
+                    id = video.optLong("id", 0L),
+                    name = video.optString("name", ""),
+                    folder = video.optString("folder", ""),
+                    durationMs = video.optLong("durationMs", 0L),
+                    sizeBytes = video.optLong("sizeBytes", 0L),
+                    width = video.optInt("width", 0),
+                    height = video.optInt("height", 0),
+                    dateAddedSeconds = video.optLong("dateAddedSeconds", 0L)
+                )
+            }
+        }
     }
 }

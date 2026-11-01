@@ -10,12 +10,15 @@ import com.example.call.AudioLink
 import com.example.call.CallAudioRelay
 import com.example.call.CallController
 import com.example.data.repository.PulseRepository
+import com.example.media.VideoLibrary
 import com.example.model.CallResult
 import com.example.model.PeerNotificationFeed
+import com.example.model.VideoAccess
 import com.example.notification.DeviceNotificationStore
 import com.example.notification.NotificationForwarder
 import com.example.notification.PulseNotificationManager
 import com.example.security.Pairing
+import com.example.security.StreamTokens
 import com.example.service.PulseNotificationListener
 import com.example.telemetry.TelemetryCollector
 import com.example.util.JsonUtils
@@ -23,6 +26,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -34,6 +39,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.BufferedReader
+import java.io.FileInputStream
+import java.io.IOException
 import java.io.InputStreamReader
 import java.io.OutputStream
 import java.net.ServerSocket
@@ -48,7 +55,9 @@ class PulseServer(
     private val notificationForwarder: NotificationForwarder,
     private val callController: CallController,
     private val pairing: Pairing,
-    private val callAudioRelay: CallAudioRelay
+    private val callAudioRelay: CallAudioRelay,
+    private val videoLibrary: VideoLibrary,
+    private val streamTokens: StreamTokens
 ) {
     private val scope = CoroutineScope(Dispatchers.IO + Job())
     private var serverSocket: ServerSocket? = null
@@ -131,6 +140,8 @@ class PulseServer(
                 var contentLength = 0
                 var nonce: String? = null
                 var signature: String? = null
+                var streamToken: String? = null
+                var range: String? = null
                 var line: String?
                 while (reader.readLine().also { line = it } != null) {
                     if (line.isNullOrEmpty()) break
@@ -142,6 +153,10 @@ class PulseServer(
                             nonce = headerLower.substringAfter(":").trim()
                         headerLower.startsWith(Pairing.HEADER_SIGNATURE.lowercase() + ":") ->
                             signature = headerLower.substringAfter(":").trim()
+                        headerLower.startsWith(StreamTokens.HEADER.lowercase() + ":") ->
+                            streamToken = headerLower.substringAfter(":").trim()
+                        headerLower.startsWith("range:") ->
+                            range = headerLower.substringAfter(":").trim()
                     }
                 }
 
@@ -257,11 +272,47 @@ class PulseServer(
                         sendJsonResponse(output, 200, JSONObject().put("nonce", pairing.newChallenge()).toString())
                     }
 
-                    // Calls cost money and the sound relay opens a microphone, so everything below
-                    // needs this device's pairing code
-                    (path.startsWith("/api/call/") || path.startsWith("/api/audio/")) &&
+                    // Calls cost money, the sound relay opens a microphone and videos are private files,
+                    // so all of these need this device's pairing code
+                    (path.startsWith("/api/call/") || path.startsWith("/api/audio/") || path.startsWith("/api/media/session")) &&
                         !pairing.verify(nonce, signature, method, path, body) -> {
                         sendJsonResponse(output, 403, "{\"error\": \"pairing\"}")
+                    }
+
+                    method == "POST" && path.startsWith("/api/media/session") -> {
+                        // A peer that showed it has the pairing code gets a pass for the requests below
+                        val refusal = videoLibrary.refusal()
+                        val answer = JSONObject()
+                            .put("ok", refusal == null)
+                            .put("reason", refusal?.reason ?: VideoAccess.OK.reason)
+                        if (refusal == null) answer.put("token", streamTokens.issue())
+                        sendJsonResponse(output, 200, answer.toString())
+                    }
+
+                    // Turning sharing off or taking the permission away stops a pass from working at once
+                    path.startsWith("/api/media/") &&
+                        (!streamTokens.isValid(streamToken) || videoLibrary.refusal() != null) -> {
+                        sendJsonResponse(output, 403, "{\"error\": \"pairing\"}")
+                    }
+
+                    method == "GET" && path.startsWith("/api/media/list") -> {
+                        sendJsonResponse(output, 200, JsonUtils.videosToJson(videoLibrary.list()).toString())
+                    }
+
+                    method == "GET" && path.startsWith("/api/media/thumb/") -> {
+                        val thumbnail = videoIdFrom(path)?.let { videoLibrary.thumbnail(it) }
+                        if (thumbnail != null) {
+                            // Saved on the other phone for a day, so scrolling the list does not fetch them again
+                            sendResponseHead(output, 200, "image/jpeg", thumbnail.size.toLong(), "Cache-Control: max-age=86400\r\n")
+                            output.write(thumbnail)
+                            output.flush()
+                        } else {
+                            sendJsonResponse(output, 404, "{\"error\": \"Not Found\"}")
+                        }
+                    }
+
+                    method == "GET" && path.startsWith("/api/media/stream/") -> {
+                        sendVideo(output, videoIdFrom(path), range, clientIp)
                     }
 
                     method == "POST" && path.startsWith("/api/audio/stream") -> {
@@ -395,23 +446,93 @@ class PulseServer(
         else -> 3
     }
 
+    private fun videoIdFrom(path: String): Long? = path.substringBefore('?').substringAfterLast('/').toLongOrNull()
+
+    /**
+     * Sends the part of a video the player asked for. The file is read as it goes out, so a whole
+     * film never sits in memory.
+     */
+    private suspend fun sendVideo(output: OutputStream, id: Long?, rangeHeader: String?, clientIp: String) {
+        val file = id?.let { videoLibrary.open(it) }
+        if (file == null) {
+            sendJsonResponse(output, 404, "{\"error\": \"Not Found\"}")
+            return
+        }
+
+        file.use {
+            val size = it.statSize
+            val range = ByteRange.forRequest(rangeHeader, size)
+            if (range == null) {
+                sendResponseHead(output, 416, "application/octet-stream", 0, "Content-Range: bytes */$size\r\n")
+                output.flush()
+                return
+            }
+
+            val extraHeaders = "Accept-Ranges: bytes\r\n" +
+                if (range.isPartial) "Content-Range: bytes ${range.start}-${range.end}/$size\r\n" else ""
+            sendResponseHead(
+                output,
+                if (range.isPartial) 206 else 200,
+                videoLibrary.mimeType(id),
+                range.length,
+                extraHeaders
+            )
+            if (range.start == 0L) addLog("🎬 $clientIp started watching a video")
+
+            try {
+                videoLibrary.whileStreaming {
+                    val input = FileInputStream(it.fileDescriptor)
+                    input.channel.position(range.start)
+                    val buffer = ByteArray(STREAM_BUFFER_BYTES)
+                    var remaining = range.length
+                    while (remaining > 0) {
+                        currentCoroutineContext().ensureActive()
+                        // Turning sharing off also ends what is already playing
+                        if (!videoLibrary.isSharingEnabled) break
+                        val read = input.read(buffer, 0, minOf(remaining, buffer.size.toLong()).toInt())
+                        if (read == -1) break
+                        output.write(buffer, 0, read)
+                        remaining -= read
+                    }
+                    output.flush()
+                }
+            } catch (e: IOException) {
+                // The player drops its connection every time the user skips, so this is not a fault
+                Log.d("PulseServer", "Video stream to $clientIp closed: ${e.message}")
+            }
+        }
+    }
+
     private fun sendJsonResponse(output: OutputStream, statusCode: Int, jsonBody: String) {
+        val bytes = jsonBody.toByteArray(StandardCharsets.UTF_8)
+        sendResponseHead(output, statusCode, "application/json; charset=utf-8", bytes.size.toLong())
+        output.write(bytes)
+        output.flush()
+    }
+
+    private fun sendResponseHead(
+        output: OutputStream,
+        statusCode: Int,
+        contentType: String,
+        contentLength: Long,
+        extraHeaders: String = ""
+    ) {
         val statusText = when (statusCode) {
             200 -> "OK"
+            206 -> "Partial Content"
             403 -> "Forbidden"
             404 -> "Not Found"
+            416 -> "Range Not Satisfiable"
             else -> "Error"
         }
-        val bytes = jsonBody.toByteArray(StandardCharsets.UTF_8)
         val headers = "HTTP/1.1 $statusCode $statusText\r\n" +
-                "Content-Type: application/json; charset=utf-8\r\n" +
-                "Content-Length: ${bytes.size}\r\n" +
+                "Content-Type: $contentType\r\n" +
+                "Content-Length: $contentLength\r\n" +
+                extraHeaders +
                 "Access-Control-Allow-Origin: *\r\n" +
                 "Connection: close\r\n\r\n"
 
         output.write(headers.toByteArray(StandardCharsets.UTF_8))
-        output.write(bytes)
-        output.flush()
     }
 
     private fun addLog(msg: String) {
@@ -421,5 +542,9 @@ class PulseServer(
         if (current.size > 50) current.removeAt(0)
         current.add(entry)
         _serverLog.value = current
+    }
+
+    private companion object {
+        const val STREAM_BUFFER_BYTES = 64 * 1024
     }
 }

@@ -9,10 +9,10 @@ import javax.crypto.spec.PBEKeySpec
 import javax.crypto.spec.SecretKeySpec
 
 /**
- * The pairing code that guards what costs money or opens a microphone: phone calls and the call
- * sound relay. Each device has its own code, shown in its settings. Another device has to be given
- * that code once, and from then on proves it knows the code with every request, without ever
- * sending the code itself over the network.
+ * The pairing code that guards what costs money, opens a microphone or exposes private files: phone
+ * calls, the call sound relay and shared videos. Each device has its own code, shown in its settings.
+ * Another device has to be given that code once, and from then on proves it knows the code with
+ * every request, without ever sending the code itself over the network.
  */
 class Pairing(context: Context) {
 

@@ -119,6 +119,78 @@ enum class CallResult(val reason: String) {
 }
 
 /**
+ * Outcome of asking a device to let this one watch its videos
+ */
+enum class VideoAccess(val reason: String) {
+    OK(""),
+    DISABLED("disabled"), // "Share My Videos" is off on that device
+    NO_PERMISSION("permission"), // that device has not granted PulseLink access to its videos
+    NOT_PAIRED("pairing"), // the request was not signed with that device's pairing code
+    UNSUPPORTED("unsupported"), // that device runs an older PulseLink without this
+    FAILED("failed"); // that device could not be reached or did not answer properly
+
+    companion object {
+        fun fromReason(reason: String): VideoAccess = entries.firstOrNull { it.reason == reason } ?: FAILED
+    }
+}
+
+/**
+ * The answer to asking for access to a device's videos, with the pass to use when it was granted
+ */
+data class VideoSession(val access: VideoAccess, val token: String = "")
+
+/**
+ * A video stored on a device, as listed for a paired device to pick from
+ */
+data class SharedVideo(
+    val id: Long = 0,
+    val name: String = "",
+    val folder: String = "",
+    val durationMs: Long = 0,
+    val sizeBytes: Long = 0,
+    val width: Int = 0,
+    val height: Int = 0,
+    val dateAddedSeconds: Long = 0
+) {
+    val durationText: String
+        get() {
+            val totalSeconds = durationMs / 1000
+            val hours = totalSeconds / 3600
+            val minutes = totalSeconds / 60 % 60
+            val seconds = totalSeconds % 60
+            return if (hours > 0) "%d:%02d:%02d".format(hours, minutes, seconds) else "%d:%02d".format(minutes, seconds)
+        }
+
+    val sizeText: String
+        get() = when {
+            sizeBytes >= 1_000_000_000 -> "%.1f GB".format(sizeBytes / 1_000_000_000.0)
+            sizeBytes >= 1_000_000 -> "%d MB".format(sizeBytes / 1_000_000)
+            else -> "%d KB".format(sizeBytes / 1_000)
+        }
+
+    // Named after the shorter side, so a video filmed upright reads the same as a wide one
+    val qualityText: String
+        get() {
+            val shortSide = minOf(width, height)
+            return when {
+                shortSide >= 2160 -> "4K"
+                shortSide > 0 -> "${shortSide}p"
+                else -> ""
+            }
+        }
+}
+
+/**
+ * What this device knows about the videos on the device it is connected to
+ */
+data class PeerVideoLibrary(
+    val access: VideoAccess? = null, // null until the first answer
+    val isLoading: Boolean = false,
+    val token: String = "", // sent along when fetching thumbnails
+    val videos: List<SharedVideo> = emptyList()
+)
+
+/**
  * One message of a chat notification
  */
 data class ChatMessage(

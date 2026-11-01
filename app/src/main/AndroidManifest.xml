@@ -32,6 +32,9 @@
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
+    <!-- Let a paired device watch this phone's videos (asked for only when the user turns on "Share My Videos") -->
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
 
     <!-- Lets shared notifications show the posting app's name (e.g. WhatsApp) -->
     <queries>
@@ -64,6 +67,15 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Full-screen player for a video on the connected device. It handles turning by itself so
+             playback does not restart. -->
+        <activity
+            android:name=".VideoPlayerActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode"
+            android:exported="false"
+            android:label="@string/app_name"
+            android:theme="@style/Theme.MyApplication" />
 
         <!-- Background Sync & Listener Service -->
         <service

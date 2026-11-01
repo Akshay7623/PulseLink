@@ -275,7 +275,7 @@ fun PairingCodeDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
-                    text = "On $peerName, open PulseLink settings and turn on \"Allow Remote Calls\". The 8-character pairing code appears below it.",
+                    text = "On $peerName, open PulseLink settings and turn on \"Allow Remote Calls\" or \"Share My Videos\". The 8-character pairing code appears below it.",
                     style = MaterialTheme.typography.bodyMedium
                 )
                 // Kept exactly as typed: rewriting it on every key makes some keyboards drop letters.
@@ -315,6 +315,30 @@ fun PairingCodeDialog(
 }
 
 @Composable
+private fun MyPairingCode(code: String, hint: String, tag: String) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+    ) {
+        Column(modifier = Modifier.padding(10.dp)) {
+            Text(
+                text = "Pairing code: $code",
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace,
+                modifier = Modifier.testTag(tag)
+            )
+            Text(
+                text = hint,
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
 fun DeviceSettingsDialog(
     deviceName: String,
     isServerRunning: Boolean,
@@ -330,6 +354,8 @@ fun DeviceSettingsDialog(
     hasMicPermission: Boolean,
     isAccessibilityOn: Boolean,
     hasBluetoothPermission: Boolean,
+    isSharingVideos: Boolean,
+    hasVideoPermission: Boolean,
     serverLogs: List<String>,
     onUpdateDeviceName: (String) -> Unit,
     onToggleServer: (Boolean) -> Unit,
@@ -343,6 +369,8 @@ fun DeviceSettingsDialog(
     onGrantMicPermission: () -> Unit,
     onOpenAccessibilitySettings: () -> Unit,
     onGrantBluetoothPermission: () -> Unit,
+    onToggleVideoSharing: (Boolean) -> Unit,
+    onGrantVideoPermission: () -> Unit,
     onDismiss: () -> Unit
 ) {
     var editName by remember { mutableStateOf(deviceName) }
@@ -531,26 +559,11 @@ fun DeviceSettingsDialog(
 
                 if (isRemoteCallsAllowed) {
                     // Only a device that was given this code may use this phone's calls
-                    Surface(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(8.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
-                    ) {
-                        Column(modifier = Modifier.padding(10.dp)) {
-                            Text(
-                                text = "Pairing code: $myPairingCode",
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold,
-                                fontFamily = FontFamily.Monospace,
-                                modifier = Modifier.testTag("my_pairing_code")
-                            )
-                            Text(
-                                text = "Type this once in the Call tab of the phone that controls this one",
-                                fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
+                    MyPairingCode(
+                        code = myPairingCode,
+                        hint = "Type this once in the Call tab of the phone that controls this one",
+                        tag = "my_pairing_code"
+                    )
 
                     // Let The Paired Device Hear And Talk On This Phone's Calls Toggle
                     Row(
@@ -633,6 +646,54 @@ fun DeviceSettingsDialog(
                             lineHeight = 13.sp
                         )
                     }
+                }
+
+                // Let The Paired Device Watch This Phone's Videos Toggle
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Share My Videos",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = when {
+                                !isSharingVideos -> "Let a device with this phone's pairing code watch all the videos stored here"
+                                hasVideoPermission -> "On: a device with the pairing code can see the names of, and watch, all the videos on this phone"
+                                else -> "Video permission is not granted yet"
+                            },
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = isSharingVideos,
+                        onCheckedChange = onToggleVideoSharing,
+                        modifier = Modifier.testTag("share_videos_toggle")
+                    )
+                }
+
+                if (isSharingVideos && !hasVideoPermission) {
+                    OutlinedButton(
+                        onClick = onGrantVideoPermission,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("grant_video_permission_btn")
+                    ) {
+                        Text("Grant Video Permission")
+                    }
+                }
+
+                if (isSharingVideos) {
+                    MyPairingCode(
+                        code = myPairingCode,
+                        hint = "Type this once in the Videos tab of the phone that watches. The same code works for calls.",
+                        tag = "my_pairing_code_videos"
+                    )
                 }
 
                 // Live Server Packet Log

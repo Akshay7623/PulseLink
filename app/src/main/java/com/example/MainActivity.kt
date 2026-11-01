@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -40,6 +41,7 @@ import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Radar
 import androidx.compose.material.icons.filled.Sensors
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.VideoLibrary
 import androidx.compose.material.icons.filled.WifiTethering
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
@@ -66,6 +68,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -79,6 +82,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.call.CallController
+import com.example.media.VideoLibrary
 import com.example.model.PeerDevice
 import com.example.security.Pairing
 import com.example.ui.PulseViewModel
@@ -92,6 +96,8 @@ import com.example.ui.components.LocalDeviceCard
 import com.example.ui.components.NotificationComposer
 import com.example.ui.components.NotificationHistoryList
 import com.example.ui.components.TelemetryDashboardCard
+import com.example.ui.components.VideoLibraryCard
+import com.example.ui.components.VideoRow
 import com.example.ui.theme.CyanAccent
 import com.example.ui.theme.ElectricIndigo
 import com.example.ui.theme.EmeraldGlow
@@ -119,6 +125,7 @@ enum class PulseTab(val label: String, val icon: androidx.compose.ui.graphics.ve
     TELEMETRY("Live Data", Icons.Default.Sensors),
     SEND_NOTIFY("Send", Icons.Default.Campaign),
     CALL("Call", Icons.Default.Dialpad),
+    VIDEOS("Videos", Icons.Default.VideoLibrary),
     INBOX("Inbox", Icons.Default.History),
     DEVICES("Radar", Icons.Default.Radar)
 }
@@ -162,7 +169,11 @@ fun PulseLinkApp(viewModel: PulseViewModel) {
     val isAccessibilityOn by viewModel.isAccessibilityOn.collectAsStateWithLifecycle()
     val hasBluetoothPermission by viewModel.hasBluetoothPermission.collectAsStateWithLifecycle()
     val bluetoothSound by viewModel.bluetoothSound.collectAsStateWithLifecycle()
+    val isSharingVideos by viewModel.isSharingVideos.collectAsStateWithLifecycle()
+    val hasVideoPermission by viewModel.hasVideoPermission.collectAsStateWithLifecycle()
+    val peerVideos by viewModel.peerVideos.collectAsStateWithLifecycle()
 
+    var videoSearch by rememberSaveable { mutableStateOf("") }
     var showDirectIpDialog by remember { mutableStateOf(false) }
     var showHotspotGuideDialog by remember { mutableStateOf(false) }
     var showSettingsDialog by remember { mutableStateOf(false) }
@@ -211,6 +222,18 @@ fun PulseLinkApp(viewModel: PulseViewModel) {
         }
     }
 
+    // Asked for only when the user turns on "Share My Videos"
+    val videoPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        viewModel.refreshLocalTelemetry()
+        if (!granted) {
+            scope.launch {
+                snackbarHostState.showSnackbar("Allow Videos in Settings > Apps > PulseLink > Permissions to share videos")
+            }
+        }
+    }
+
     LaunchedEffect(Unit) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
@@ -222,6 +245,11 @@ fun PulseLinkApp(viewModel: PulseViewModel) {
     // The dial pad says whether the peer has a Bluetooth headset connected, so ask afresh on opening it
     LaunchedEffect(selectedTab, selectedPeer) {
         if (selectedTab == PulseTab.CALL) viewModel.refreshPeerHeadset()
+    }
+
+    // Also runs again once a pairing code is saved, so the videos appear without another tap
+    LaunchedEffect(selectedTab, selectedPeer, partnerPairingCode) {
+        if (selectedTab == PulseTab.VIDEOS) viewModel.refreshPeerVideos()
     }
 
     LaunchedEffect(lastSendResult) {
@@ -292,6 +320,8 @@ fun PulseLinkApp(viewModel: PulseViewModel) {
             hasMicPermission = hasMicPermission,
             isAccessibilityOn = isAccessibilityOn,
             hasBluetoothPermission = hasBluetoothPermission,
+            isSharingVideos = isSharingVideos,
+            hasVideoPermission = hasVideoPermission,
             serverLogs = serverLogs,
             onUpdateDeviceName = { viewModel.updateDeviceName(it) },
             onToggleServer = { viewModel.toggleServer(it, serverPort) },
@@ -327,6 +357,11 @@ fun PulseLinkApp(viewModel: PulseViewModel) {
                 }
             },
             onGrantBluetoothPermission = { bluetoothPermissionLauncher.launch(Manifest.permission.BLUETOOTH_CONNECT) },
+            onToggleVideoSharing = { enabled ->
+                viewModel.toggleVideoSharing(enabled)
+                if (enabled && !hasVideoPermission) videoPermissionLauncher.launch(VideoLibrary.PERMISSION)
+            },
+            onGrantVideoPermission = { videoPermissionLauncher.launch(VideoLibrary.PERMISSION) },
             onDismiss = { showSettingsDialog = false }
         )
     }
@@ -551,6 +586,38 @@ fun PulseLinkApp(viewModel: PulseViewModel) {
                                 },
                                 onSelectPeerClick = { selectedTab = PulseTab.DEVICES }
                             )
+                        }
+                    }
+
+                    PulseTab.VIDEOS -> {
+                        item {
+                            VideoLibraryCard(
+                                peer = selectedPeer,
+                                library = peerVideos,
+                                isPaired = partnerPairingCode.length == Pairing.CODE_LENGTH,
+                                search = videoSearch,
+                                onSearchChange = { videoSearch = it },
+                                onRefresh = { viewModel.refreshPeerVideos() },
+                                onEditPairingCode = { viewModel.askForPairingCode(true) },
+                                onSelectPeerClick = { selectedTab = PulseTab.DEVICES }
+                            )
+                        }
+                        selectedPeer?.let { peer ->
+                            val visibleVideos = peerVideos.videos.filter {
+                                videoSearch.isBlank() ||
+                                    it.name.contains(videoSearch.trim(), ignoreCase = true) ||
+                                    it.folder.contains(videoSearch.trim(), ignoreCase = true)
+                            }
+                            items(visibleVideos, key = { it.id }) { video ->
+                                VideoRow(
+                                    video = video,
+                                    peer = peer,
+                                    token = peerVideos.token,
+                                    onPlay = {
+                                        VideoPlayerActivity.start(context, peer.ip, peer.port, video.id, video.name)
+                                    }
+                                )
+                            }
                         }
                     }
 

@@ -1,11 +1,33 @@
 # PulseLink
 
-**Use two Android phones as one.** See your main phone's messages and calls on your second phone, reply to chats, make calls from your main phone's SIM, and check its battery and signal, all over your own Wi-Fi or hotspot. No account, no internet server, no sign-up.
+**Use two Android phones as one.** See your main phone's messages and calls on your second phone, reply to chats, make calls from your main phone's SIM, watch the videos stored on it, and check its battery and signal, all over your own Wi-Fi or hotspot. No PulseLink account, no PulseLink server, no sign-up. To use it when the phones are far apart, see [Watch from anywhere](#-watch-phone-as-videos-on-phone-b).
 
 [![Download PulseLink APK](https://img.shields.io/badge/Download-PulseLink.apk-2ea44f?style=for-the-badge&logo=android&logoColor=white)](https://github.com/Akshay7623/PulseLink/releases/latest/download/PulseLink.apk)
 
 **Download link:** https://github.com/Akshay7623/PulseLink/releases/latest/download/PulseLink.apk
 (All versions: https://github.com/Akshay7623/PulseLink/releases)
+
+---
+
+## Screenshots
+
+<table>
+  <tr>
+    <td align="center"><img src="docs/screenshots/live-data.png" width="200" alt="Live Data tab showing Phone A's battery and status"><br><b>Live status</b></td>
+    <td align="center"><img src="docs/screenshots/videos.png" width="200" alt="Videos tab listing a video stored on the other phone"><br><b>Videos on the other phone</b></td>
+    <td align="center"><img src="docs/screenshots/call.png" width="200" alt="Call tab with a dial pad for calling from Phone A's SIM"><br><b>Call from Phone A's SIM</b></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshots/send.png" width="200" alt="Send tab for writing a notification to the other phone"><br><b>Send an alert</b></td>
+    <td align="center"><img src="docs/screenshots/radar.png" width="200" alt="Radar tab for finding and connecting to the other phone"><br><b>Connect the phones</b></td>
+    <td></td>
+  </tr>
+</table>
+
+<p align="center">
+  <img src="docs/screenshots/video-player.png" width="620" alt="Full-screen video player showing a test video with play controls and a time bar"><br>
+  <b>Full-screen player, with skipping and resume</b> (showing a test video)
+</p>
 
 ---
 
@@ -16,6 +38,7 @@
 | 🔔 **See notifications from your other phone** | WhatsApp, SMS, calls and other app notifications from Phone A pop up on Phone B. |
 | 💬 **Reply to chats** | Reply to a WhatsApp or SMS message on Phone A without picking it up. |
 | 📞 **Make and answer calls remotely** | Dial a number on Phone B and the call goes out from Phone A's SIM. Answer or hang up Phone A's calls from Phone B. |
+| 🎬 **Watch Phone A's videos** | Browse and play the movies and videos stored on Phone A from Phone B, without copying them first. |
 | 🔋 **Live phone status** | See Phone A's battery %, charging, 5G/4G network, signal, free RAM and storage, updating live. |
 | 📣 **Send alerts** | Send your own notification to the other phone, with sound and vibration. |
 | 📍 **Find your phone** | Make the other phone ring or vibrate. |
@@ -32,7 +55,7 @@ In this guide:
 - Both phones on the **same Wi-Fi**, **or** one phone's **mobile hotspot** turned on and the other phone connected to it.
 - PulseLink installed on **both** phones.
 
-> No internet is needed. The phones talk to each other directly, so your messages never leave your own network.
+> No internet is needed on the same network. The phones talk to each other directly, so your messages never leave your own network. Only if the phones are in different places do they need the internet and the free Tailscale app (see **Watch from anywhere** below).
 
 ---
 
@@ -120,6 +143,29 @@ Now Phone A's notifications pop up on Phone B, and they also show in Phone B's *
   3. On Phone B: **Call** tab → switch on **Hear and talk on this phone** → allow **Microphone**.
   4. Optional: pair the two phones with each other in Android's **Bluetooth** settings, then switch on **Use Bluetooth between the phones** on Phone B. The sound then goes over Bluetooth instead of Wi-Fi.
 
+### 🎬 Watch Phone A's videos on Phone B
+
+**On Phone A:**
+1. Tap ⚙️ → switch on **Share My Videos** → tap **Allow** when Android asks for access to videos.
+2. A **pairing code** appears below the switch. It is the same code used for calls.
+3. Switch on **Background Listener Service**, so it keeps working when the app is closed.
+
+**On Phone B:**
+1. Connect to Phone A (Step 2) and open the **Videos** tab.
+2. Tap **Enter code**, type Phone A's code, and tap **Save**. You only do this once.
+3. Tap a video to play it. Drag the bar to skip. Next time, it continues from where you stopped.
+
+**Watch from anywhere (phones in different places):**
+1. Install the free **[Tailscale](https://tailscale.com/download)** app on both phones, sign in to the **same account** on both, and switch it on.
+2. On Phone A: **Settings → Apps → PulseLink → Battery → Unrestricted**, and leave it connected to the internet, ideally on Wi-Fi and charging.
+3. On Phone B, go to **Radar** → **Add IP** and type Phone A's `100.x.x.x` address from the Tailscale app. Leave the port as `8765`.
+
+Good to know:
+- Phone A must stay switched on and online. It sends the original file, so its upload speed must keep up with the video: about 2.5 Mbps for a 2 GB, 2-hour movie, and much more for 4K.
+- A video can use up to its full file size in data on **each** phone. Avoid mobile data on Phone A unless your plan allows it.
+- If a video plays with no sound or no picture, Phone B cannot decode that format. The message on screen tells you which.
+- Android runs one VPN at a time, so Tailscale cannot run alongside another VPN.
+
 ### 🔋 Watch Phone A's battery and network live
 
 On Phone B, open **Live Data**. Switch on **Real-Time Telemetry Stream** to keep it updating, and pick how often.
@@ -135,7 +181,8 @@ Go to **Send**, pick the phone, write a title and message (or tap a **Quick Temp
 
 - **Everything stays on your network.** PulseLink has no server and no account. The phones talk directly over your Wi-Fi or hotspot.
 - **Use only your own Wi-Fi or hotspot** when **Share My Notifications** is on. Any phone running PulseLink on the same network can see Phone A's notifications, so **do not turn it on at public Wi-Fi** (cafés, offices, hotels, trains).
-- **Calls are protected by the pairing code.** Only a phone that has Phone A's pairing code can make or answer calls on it. Do not share the code with anyone.
+- **Calls and videos are protected by the pairing code.** Only a phone that has Phone A's pairing code can make or answer calls on it or watch its videos. Do not share the code with anyone.
+- **Videos are not encrypted by PulseLink.** On your own Wi-Fi or hotspot that is usually fine, because they stay on your network. Tailscale encrypts everything between the phones. **Never open PulseLink's port to the internet on a router**, as other parts of the app, such as notifications, have no pairing code.
 - Every permission is asked for only when you switch on the feature that needs it. Switch a feature off to stop it.
 
 ---
@@ -158,6 +205,12 @@ Go to **Send**, pick the phone, write a title and message (or tap a **Quick Temp
 **Calls don't work**
 - On Phone A, check **Allow Remote Calls** is on and the **Phone** permission is allowed.
 - On Phone B, check the pairing code in the **Call** tab matches the one shown on Phone A (tap **Change** to re-enter it).
+
+**Videos don't load or keep stopping**
+- On Phone A, check **Share My Videos** is on and the **Videos** permission is allowed.
+- On Phone B, check the pairing code in the **Videos** tab matches the one shown on Phone A.
+- If the phones are far apart, check **Tailscale** is switched on on both.
+- A video that keeps pausing to load is too large for Phone A's upload speed. Try a smaller one, or move Phone A to faster Wi-Fi.
 
 **The hotspot address changed**
 - Addresses can change each time a hotspot is switched on. Tap **Scan Network** again, or remove the old phone from **Saved & Past Devices** and add it again.

@@ -83,8 +83,10 @@ class PulseForegroundService : Service() {
             .build()
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            // Android 15 stops data sync services after 6 hours a day, too short for a phone left to
+            // serve another one, so newer versions run this as a connected device service only
             val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC or ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
             } else {
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
             }
